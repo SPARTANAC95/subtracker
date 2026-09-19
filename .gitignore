@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.env
+.env.*
+*.local
+
+# App data and recovery artifacts
+data/
+local/
+subscriptions-*.json
+subscriptions-*.pdf
+recovered-*.json
+rescue-*.json
+subtracker-backup*.json
+subtracker-recovery-*.json
+
+# Test and browser automation output
+output/
+.playwright-cli/
+playwright-report/
+coverage/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log
+nul

@@ -1,0 +1,79 @@
+{
+  "app": "subtracker-pro",
+  "version": 2,
+  "exportedAt": "2026-09-07T00:48:41.554Z",
+  "settings": {
+    "currency": "GBP",
+    "budget": 120,
+    "notifications": false,
+    "reminderDays": 3,
+    "setupDate": "2026-09-07T00:48:32.179Z",
+    "rates": {},
+    "lastBackupAt": "2026-09-07T00:48:41.554Z"
+  },
+  "subs": [
+    {
+      "name": "Review Plan",
+      "amount": 20,
+      "currency": "EUR",
+      "kind": "recurring",
+      "endDate": null,
+      "cycle": "monthly",
+      "category": "other",
+      "billingDate": "2026-09-07",
+      "startDate": null,
+      "notes": "",
+      "status": "active",
+      "canceledAt": null,
+      "paused": false,
+      "lastPaid": "2026-09-07",
+      "tags": [],
+      "payment": "",
+      "renewal": "auto",
+      "isTrial": false,
+      "trialEnd": null,
+      "isShared": false,
+      "sharedN": 1,
+      "sharedPct": 100,
+      "url": "https://example.com/account",
+      "paymentHistory": [
+        {
+          "date": "2026-09-07",
+          "paidAt": "2026-09-07",
+          "dueFor": "2026-09-07",
+          "amount": 20,
+          "currency": "USD"
+        }
+      ],
+      "id": "95f89c01-7eab-4228-9d90-163b29ee38da"
+    },
+    {
+      "name": "Annual License",
+      "amount": 80,
+      "currency": "USD",
+      "kind": "reminder",
+      "endDate": "2026-09-08",
+      "cycle": "monthly",
+      "category": "other",
+      "billingDate": "2026-09-08",
+      "startDate": null,
+      "notes": "",
+      "status": "active",
+      "canceledAt": null,
+      "paused": false,
+      "lastPaid": null,
+      "tags": [],
+      "payment": "",
+      "renewal": "manual",
+      "isTrial": false,
+      "trialEnd": null,
+      "isShared": false,
+      "sharedN": 1,
+      "sharedPct": 100,
+      "url": "",
+      "paymentHistory": [],
+      "id": "88e63fef-4917-4aee-a70e-ef2e33d4e03a"
+    }
+  ],
+  "dismissed": []
+}

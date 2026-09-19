@@ -1,0 +1,758 @@
+@import "tailwindcss";
+
+/* ════════════════════════════════════════════════════════════════════
+   SubTracker Pro — application stylesheet
+   Black & Gold redesign (design_handoff_dark_redesign)
+
+   Structure:
+     1. Design tokens
+     2. Base / atmosphere
+     3. Surfaces
+     4. Typography
+     5. Buttons & pills
+     6. Form controls
+     7. Component classes (sidebar, palette, toast, bulk bar, presets)
+     8. Layout grids
+     9. Application shell (sidebar, headers, content, mobile nav)
+    10. Responsive
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Design tokens ──────────────────────────────────────────────── */
+
+@theme {
+  --font-sans: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Space Grotesk', ui-monospace, monospace;
+
+  --color-brand: #b68235;
+  --color-brand-light: #e1ad66;
+  --color-brand-dark: #a06f24;
+
+  --color-danger: #d99f8b;
+}
+
+:root {
+  color-scheme: dark;
+  --app-bg: #060605;
+  --app-sidebar: rgba(23, 22, 19, 0.88);
+  --app-surface: rgba(242, 240, 234, 0.045);
+  --app-surface-raised: #1b1a17;
+  --app-border: rgba(242, 240, 234, 0.07);
+  --app-border-strong: rgba(242, 240, 234, 0.14);
+  --app-text: #f2f0ea;
+  --app-muted: rgba(242, 240, 234, 0.62);
+  --app-mint: #9ec8a0;
+  --app-violet: #e1ad66;
+  --app-gold: #e1ad66;
+  --app-gold-light: #facb8d;
+  --app-gold-pale: #f6e2c4;
+  --app-sand: #d9c28b;
+  --app-terra: #d99f8b;
+}
+
+/* ── 2. Base / atmosphere ──────────────────────────────────────────── */
+
+* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background: var(--app-bg);
+  color: var(--app-muted);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(225, 173, 102, 0.35); }
+
+/* Slow-drifting warm glow behind the app. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -30%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 34% 26% at 76% 12%, rgba(225, 173, 102, 0.08), transparent 68%),
+    radial-gradient(ellipse 30% 24% at 18% 4%, rgba(242, 240, 234, 0.04), transparent 70%);
+  animation: glow-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes glow-drift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1); }
+  to { transform: translate3d(2.5%, 2%, 0) scale(1.07); }
+}
+
+/* Film grain over everything — breaks up banding in the large dark fields. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.02;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  html { scroll-behavior: auto; }
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(242, 240, 234, 0.12); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(242, 240, 234, 0.2); }
+
+:focus-visible {
+  outline: 2px solid #e1ad66;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── 3. Surfaces ───────────────────────────────────────────────────── */
+
+.glass {
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(242, 240, 234, 0.045), rgba(242, 240, 234, 0.016));
+  border: 1px solid rgba(242, 240, 234, 0.07);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.glass-deep {
+  border-radius: 20px;
+  background: #151412;
+  border: 1px solid rgba(242, 240, 234, 0.11);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+/* Floating right-hand panels (detail drawer, add/edit form). */
+.app-panel {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  bottom: 12px;
+  border-radius: 22px;
+  border: 1px solid rgba(242, 240, 234, 0.1);
+  background: #131210;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+/* ── 4. Typography ─────────────────────────────────────────────────── */
+
+/* Space Grotesk, tabular figures for anything that is money or a count. */
+.font-figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+h1, h2, h3, h4, h5, h6 { letter-spacing: -0.01em; }
+
+/* Uppercase letterspaced micro-label used across cards. */
+.micro-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--app-muted);
+}
+
+/* Category line under a service name. */
+.cat-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(242, 240, 234, 0.4);
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  border: 1px solid rgba(242, 240, 234, 0.14);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: rgba(242, 240, 234, 0.55);
+  background: rgba(242, 240, 234, 0.04);
+}
+
+/* ── 5. Buttons & pills ────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--app-text);
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s, color 0.16s, transform 0.16s;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary {
+  background: rgba(225, 173, 102, 0.12);
+  border-color: rgba(225, 173, 102, 0.5);
+  color: #facb8d;
+}
+.btn-primary:hover:not(:disabled) { background: rgba(225, 173, 102, 0.2); }
+
+.btn-secondary { background: rgba(242, 240, 234, 0.06); border-color: transparent; }
+.btn-secondary:hover:not(:disabled) { background: rgba(242, 240, 234, 0.12); }
+
+.btn-ghost { color: rgba(242, 240, 234, 0.52); }
+.btn-ghost:hover:not(:disabled) { background: rgba(225, 173, 102, 0.1); color: var(--app-text); }
+
+.btn-danger { border-color: rgba(217, 159, 139, 0.4); color: #d99f8b; }
+.btn-danger:hover:not(:disabled) { background: rgba(217, 159, 139, 0.1); }
+
+.btn-sm { min-height: 30px; padding: 4px 14px; font-size: 12px; }
+.btn-icon { width: 32px; height: 32px; padding: 0; }
+
+/* Status badge pill; colors come from inline styles. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.status-pill i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ── 6. Form controls ──────────────────────────────────────────────── */
+
+.input-base {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(242, 240, 234, 0.08);
+  border-radius: 12px;
+  background: rgba(242, 240, 234, 0.045);
+  color: var(--app-text);
+  font-size: 14px;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.input-base::placeholder { color: rgba(242, 240, 234, 0.3); }
+.input-base:hover { border-color: rgba(242, 240, 234, 0.2); }
+
+.input-base:focus {
+  outline: none;
+  border-color: rgba(225, 173, 102, 0.55);
+  background: rgba(242, 240, 234, 0.06);
+  box-shadow: 0 0 0 3px rgba(225, 173, 102, 0.08);
+}
+
+select.input-base,
+select:not(.input-base) {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23918f88' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+select option { background: #161513; color: #f2f0ea; }
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+input[type="checkbox"] { accent-color: #b68235; }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(242, 240, 234, 0.5);
+}
+
+/* ── 7. Component classes ──────────────────────────────────────────── */
+
+.sidebar-nav-item {
+  display: flex;
+  width: 100%;
+  min-height: 41px;
+  align-items: center;
+  gap: 11px;
+  border: none;
+  border-radius: 12px;
+  padding: 9px 11px;
+  background: none;
+  color: rgba(242, 240, 234, 0.55);
+  font-size: 13.5px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sidebar-nav-item:hover { background: rgba(242, 240, 234, 0.06); }
+.sidebar-nav-item.active {
+  background: rgba(225, 173, 102, 0.13);
+  color: #f6e2c4;
+  font-weight: 600;
+}
+
+.sidebar-nav-num {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(242, 240, 234, 0.05);
+  color: rgba(242, 240, 234, 0.4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.sidebar-nav-item.active .sidebar-nav-num {
+  background: rgba(225, 173, 102, 0.22);
+  color: #facb8d;
+}
+
+.cmd-item {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.cmd-item:hover, .cmd-item.selected { background: rgba(242, 240, 234, 0.055); }
+
+/* Buttons in the multi-select action bar. */
+.bulk-action {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 14px;
+  background: rgba(242, 240, 234, 0.06);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text);
+  transition: background 0.15s ease;
+}
+.bulk-action:hover { background: rgba(242, 240, 234, 0.12); }
+
+.preset-item {
+  display: flex;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 9px 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.preset-item:hover { background: rgba(242, 240, 234, 0.05); }
+
+/* Dotted-hairline settings row. */
+.srow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px dotted rgba(242, 240, 234, 0.09);
+}
+.srow:last-child { border-bottom: none; }
+
+/* ── 8. Layout grids (stack below 1240px like the prototype) ───────── */
+
+.grid-main { display: grid; grid-template-columns: minmax(0, 1.62fr) minmax(0, 0.88fr); gap: 14px; align-items: stretch; }
+.grid-sub { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.7fr); gap: 14px; align-items: stretch; }
+.grid-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+/* Dense packing lets half-width cards backfill the gap a full-width row
+   leaves behind (Ledger + Recent payments around Billing pressure). */
+.grid-half { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: stretch; grid-auto-flow: dense; }
+.grid-cal { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr); gap: 14px; align-items: stretch; }
+
+@media (max-width: 1240px) {
+  .grid-main, .grid-sub, .grid-cal { grid-template-columns: 1fr; }
+  .grid-metrics { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .grid-half { grid-template-columns: 1fr; }
+}
+
+/* ── 9. Application shell ──────────────────────────────────────────── */
+
+/* The rail and desktop header are desktop-only; the media query below
+   re-enables them at the same breakpoint as the JSX `lg:` utilities. */
+.app-sidebar,
+.app-desktop-header { display: none !important; }
+
+.app-sidebar {
+  position: fixed;
+  inset: 12px auto 12px 12px;
+  z-index: 45;
+  width: 234px;
+  flex-direction: column;
+  border: 1px solid rgba(242, 240, 234, 0.07);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(23, 22, 19, 0.88), rgba(12, 12, 10, 0.88));
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  padding: 20px 13px 13px;
+}
+
+.app-brand {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 11px;
+  border-radius: 12px;
+  padding: 2px 9px;
+  color: var(--app-text);
+}
+.app-brand:hover { background: rgba(242, 240, 234, 0.04); }
+
+.app-brand-mark {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  color: #e1ad66;
+  background: linear-gradient(145deg, rgba(225, 173, 102, 0.2), rgba(182, 130, 53, 0.06));
+  border: 1px solid rgba(225, 173, 102, 0.32);
+}
+.app-brand-mark svg { width: 16px; height: 16px; }
+.app-brand-name {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.app-brand-name sup {
+  margin-left: 3px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--app-gold);
+  vertical-align: 2px;
+  letter-spacing: 0.05em;
+}
+
+.app-sidebar-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 26px;
+}
+
+.app-sidebar-footer { display: grid; gap: 12px; }
+
+.app-primary-button {
+  display: inline-flex;
+  min-height: 41px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(225, 173, 102, 0.5);
+  border-radius: 999px;
+  padding: 0 16px;
+  background: rgba(225, 173, 102, 0.12);
+  color: #facb8d;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background 150ms ease, transform 150ms ease;
+}
+.app-primary-button:hover { background: rgba(225, 173, 102, 0.2); }
+.app-primary-button:active { transform: scale(0.97); }
+.app-primary-button svg { width: 16px; height: 16px; }
+.app-sidebar-add { width: 100%; }
+
+.app-local-card {
+  border: 1px solid rgba(242, 240, 234, 0.06);
+  border-radius: 16px;
+  background: rgba(242, 240, 234, 0.04);
+  padding: 13px 14px;
+}
+.app-local-card-head { display: flex; align-items: flex-start; gap: 9px; }
+.app-local-card-head > div { min-width: 0; flex: 1; }
+.app-local-card-head > :last-child { flex: none; }
+.app-local-card-head p {
+  color: rgba(242, 240, 234, 0.55);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.app-local-card-head span { display: block; margin-top: 5px; color: rgba(242, 240, 234, 0.4); font-size: 11px; line-height: 1.5; }
+.app-local-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-top: 3px;
+  border-radius: 999px;
+  background: var(--app-mint);
+  box-shadow: 0 0 10px rgba(158, 200, 160, 0.5);
+  animation: dot-pulse 3s infinite;
+}
+@keyframes dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.app-local-card[data-status='error'] .app-local-dot,
+.app-local-card[data-status='quota'] .app-local-dot,
+.app-local-card[data-status='degraded'] .app-local-dot { background: #d99f8b; box-shadow: 0 0 10px rgba(217, 159, 139, 0.5); }
+.app-local-card-meta {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(242, 240, 234, 0.07);
+}
+.app-local-card-meta span { display: block; color: rgba(242, 240, 234, 0.4); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; }
+.app-local-card-meta strong {
+  display: block;
+  margin-top: 4px;
+  color: #facb8d;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.app-icon-button {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(242, 240, 234, 0.5);
+  transition: color 150ms ease, background 150ms ease;
+}
+.app-icon-button:hover,
+.app-icon-button.active { color: var(--app-text); background: rgba(242, 240, 234, 0.06); }
+.app-icon-button svg { width: 18px; height: 18px; }
+
+.app-shell { min-height: 100dvh; padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+
+.app-desktop-header {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  height: 74px;
+  align-items: center;
+  background: rgba(6, 6, 5, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.app-desktop-header-inner {
+  display: flex;
+  width: 100%;
+  max-width: 1270px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 auto;
+  padding: 0 38px;
+}
+
+.app-desktop-header h1,
+.app-mobile-page-heading h1 {
+  color: var(--app-text);
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.app-header-actions { display: flex; align-items: center; gap: 12px; }
+.app-header-actions time { font-size: 12px; color: rgba(242, 240, 234, 0.42); }
+
+.app-search-button {
+  display: inline-flex;
+  width: min(252px, 22vw);
+  min-width: 120px;
+  flex-shrink: 1;
+  height: 38px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(242, 240, 234, 0.08);
+  border-radius: 999px;
+  background: rgba(242, 240, 234, 0.045);
+  padding: 0 14px;
+  color: rgba(242, 240, 234, 0.42);
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+.app-search-button:hover { background: rgba(242, 240, 234, 0.08); color: rgba(242, 240, 234, 0.65); }
+.app-search-button svg { width: 14px; height: 14px; }
+.app-search-button span { min-width: 0; flex: 1; text-align: left; }
+
+.app-content { width: 100%; max-width: 1270px; margin: 0 auto; padding: 18px 14px 24px; }
+
+.app-mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--app-border);
+  background: rgba(6, 6, 5, 0.9);
+  padding: max(7px, env(safe-area-inset-top)) 10px 7px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.app-mobile-header-actions { display: flex; align-items: center; gap: 2px; }
+.app-mobile-page-heading { margin-bottom: 18px; padding: 2px 2px 0; }
+.app-mobile-page-heading time { display: block; margin-top: 4px; color: rgba(242, 240, 234, 0.42); font-size: 13px; }
+
+.app-mobile-nav {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 60;
+  border-top: 1px solid var(--app-border);
+  background: rgba(12, 12, 10, 0.97);
+  padding-bottom: env(safe-area-inset-bottom);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+.app-mobile-nav-inner {
+  display: grid;
+  max-width: 540px;
+  min-height: 72px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: end;
+  margin: 0 auto;
+}
+.app-mobile-nav-item {
+  display: flex;
+  min-height: 68px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: rgba(242, 240, 234, 0.42);
+  font-size: 10px;
+  font-weight: 600;
+}
+.app-mobile-nav-item svg { width: 20px; height: 20px; }
+.app-mobile-nav-item.active { color: var(--app-gold); }
+
+.app-mobile-add {
+  display: flex;
+  min-height: 78px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  color: var(--app-gold-light);
+  font-size: 10px;
+}
+.app-mobile-add > span {
+  display: flex;
+  width: 50px;
+  height: 50px;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-11px);
+  border-radius: 999px;
+  background: rgba(225, 173, 102, 0.16);
+  border: 1px solid rgba(225, 173, 102, 0.5);
+  color: #facb8d;
+  box-shadow: 0 8px 28px rgba(225, 173, 102, 0.15);
+}
+.app-mobile-add svg { width: 24px; height: 24px; }
+.app-mobile-add strong { transform: translateY(-7px); font-weight: 700; }
+
+/* Renewal rows are uniform height, so the browser can skip layout for
+   off-screen ones. */
+.renewal-table > div { content-visibility: auto; contain-intrinsic-size: 0 72px; }
+
+/* ── 10. Responsive ────────────────────────────────────────────────── */
+
+@media (min-width: 640px) {
+  .app-content { padding: 22px 20px 30px; }
+}
+
+@media (min-width: 1024px) {
+  .app-sidebar,
+  .app-desktop-header { display: flex !important; }
+  .app-mobile-header,
+  .app-mobile-nav,
+  .app-mobile-page-heading { display: none !important; }
+  .app-shell { margin-left: 258px; padding-bottom: 0; }
+  .app-content { padding: 24px 38px 64px; }
+}
+
+@media (max-width: 639px) {
+  .glass { border-radius: 16px; }
+  .app-content { padding-top: 16px; }
+}
+
+/* Clear controls and compact mobile workflows within the existing gold theme. */
+.input-base.input-with-icon { padding-left: 2.4rem; }
+.input-base::placeholder { color: rgba(242, 240, 234, 0.5); }
+.field-label { color: rgba(242, 240, 234, 0.66); }
+.metric-card {
+  background: linear-gradient(135deg, rgba(225,173,102,0.055), rgba(242,240,234,0.02));
+  border-top-color: rgba(225,173,102,0.24);
+}
+.metric-card:has(button):hover { border-color: rgba(225,173,102,0.32); }
+.metric-card:has([style*="width"]) { padding-bottom: 32px; }
+.form-actions {
+  position: sticky;
+  bottom: -22px;
+  z-index: 5;
+  margin: 16px -22px -22px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--app-border-strong);
+  background: rgba(19,18,16,0.97);
+  backdrop-filter: blur(16px);
+}
+.toast-stack { width: calc(100% - 32px); }
+.toast-stack > div { min-width: 0; width: 100%; overflow-wrap: anywhere; }
+.subscription-filters label { min-width: 0; }
+.app-panel { overscroll-behavior: contain; }
+@media (max-width: 1023px) {
+  .subscription-status-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
+  .subscription-status-tabs button { min-height: 40px; padding-inline: 4px; font-size: 12px; }
+  .toast-stack { right: 16px; }
+}
+@media (max-width: 639px) {
+  .metric-card { padding: 16px 14px 20px; min-height: 142px; }
+  .metric-card .font-figure { font-size: clamp(21px, 6vw, 28px); overflow-wrap: anywhere; }
+  .srow { flex-wrap: wrap; gap: 10px; }
+  .srow > :first-child { flex: 1 1 165px; }
+  .srow > :last-child:not(:first-child) { max-width: 100%; }
+  .srow > div:last-child:not(:first-child) { flex-wrap: wrap; }
+  .input-base { font-size: 16px; }
+  .subscription-filters .input-base { font-size: 14px; }
+  .app-panel { right: 6px; top: 6px; bottom: max(6px, env(safe-area-inset-bottom)); width: calc(100% - 12px); border-radius: 18px; }
+}
