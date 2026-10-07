@@ -152,6 +152,10 @@ test('the server serves the built app shell', async t => {
   assert.match(await res.text(), /SubTracker/)
   // Unknown app routes fall back to the shell (SPA), API routes do not.
   assert.equal((await fetch(`${base}/some/app/route`)).status, 200)
+  // A missing file is a 404, never the app shell: serving HTML for a stale
+  // script URL breaks the page and poisons the service-worker cache.
+  assert.equal((await fetch(`${base}/assets/gone-abc123.js`)).status, 404)
+  assert.equal((await fetch(`${base}/missing.png`)).status, 404)
   assert.equal((await fetch(`${base}/api/nope`)).status, 404)
 })
 

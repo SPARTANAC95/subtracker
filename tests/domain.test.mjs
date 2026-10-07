@@ -25,7 +25,7 @@ import {
   normalizeSubscription,
 } from '../src/utils/subscriptions.js'
 import { parseBackupPayload, parseBackupText } from '../src/utils/persistence.js'
-import { suggestCategory } from '../src/utils/presets.js'
+import { findPreset, getMarkColors, suggestCategory } from '../src/utils/presets.js'
 import { buildCalendarIcs } from '../src/utils/calendarExport.js'
 import { formatMoney, getRateToBase, makeSubConverter, pinSubscriptionCurrency, sanitizeRates } from '../src/utils/currencies.js'
 import { csvCell, normalizeServiceUrl } from '../src/utils/input.js'
@@ -430,4 +430,48 @@ test('payment methods and reminder states render the labels the form offers', ()
   assert.equal(reminderEndPhrase(-3), 'Ended 3 days ago')
   assert.equal(reminderEndPhrase(0), 'Ends today')
   assert.equal(reminderEndPhrase(5), 'Ends in 5 days')
+})
+
+test('a paused trial is still a trial when it resumes', () => {
+  // Pause used to strip the trial flag on the next load, so resuming the
+  // record promoted it to a paid subscription nobody had agreed to yet.
+  const paused = normalizeSubscription({ name: 'Trial', amount: 9, billingDate: '2026-10-01', isTrial: true, trialEnd: '2026-10-01', paused: true, status: 'paused' })
+  assert.equal(paused.status, 'paused')
+  assert.equal(paused.isTrial, true)
+  assert.equal(paused.trialEnd, '2026-10-01')
+  assert.equal(getSubscriptionStatus(paused), 'paused')
+  assert.equal(isActiveSub(paused), false)
+  const resumed = normalizeSubscription({ ...paused, paused: false, status: paused.isTrial ? 'trial' : 'active' })
+  assert.equal(resumed.status, 'trial')
+  // An ordinary paused subscription gains no trial flag.
+  assert.equal(normalizeSubscription({ name: 'Plain', amount: 9, billingDate: '2026-10-01', paused: true }).isTrial, false)
+})
+
+test('preset matching does not guess from loose fragments', () => {
+  // "Ne" used to resolve to Netflix and "On" to Amazon Prime, leaving a
+  // half-typed "New York Times" filed under Streaming.
+  assert.equal(suggestCategory('Ne'), null)
+  assert.equal(suggestCategory('New York Times'), null)
+  assert.equal(suggestCategory('On'), null)
+  assert.equal(suggestCategory('Plus'), null)
+  assert.equal(findPreset('Netflix Premium')?.name, 'Netflix')
+  assert.equal(findPreset('Family Spotify plan')?.name, 'Spotify')
+  assert.equal(findPreset('disney')?.name, 'Disney+')
+  assert.equal(findPreset('Disney+ bundle')?.name, 'Disney+')
+})
+
+test('service marks stay readable for dark brand colors', () => {
+  const fallback = getMarkColors({ name: 'Unknown service' })
+  assert.equal(fallback.color, '#baa3e4')
+  // PlayStation navy (#003087) is lifted well clear of the near-black surface.
+  const [r, g, b] = getMarkColors({ name: 'PlayStation Plus' }).color.match(/\d+/g).map(Number)
+  assert.ok(r + g + b > 380, `mark color too dark: ${r},${g},${b}`)
+})
+
+test('calendar export escapes Windows line endings in names', () => {
+  const ics = buildCalendarIcs([sub({ name: 'Line\r\nBreak', billingDate: '2026-07-15' })], {
+    start: '2026-07-01', end: '2026-07-31', now: new Date('2026-07-01T00:00:00Z'),
+  })
+  assert.ok(ics.includes('SUMMARY:Line\\nBreak renewal\r\n'), 'line break in a name was not folded into an escaped \\n')
+  assert.ok(!/SUMMARY:[^\r\n]*\r(?!\n)/.test(ics), 'a bare carriage return leaked into a SUMMARY line')
 })

@@ -1,104 +1,96 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, LayoutDashboard, List, BellRing, BarChart3, CalendarDays, Settings, ArrowRight } from 'lucide-react'
+import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
+import { Search, Plus, LayoutDashboard, List, BellRing, BarChart3, CalendarDays, Settings, CornerDownLeft } from 'lucide-react'
 import { getCategoryById } from '../utils/categories'
 import { formatMoney } from '../utils/currencies'
 import { getEffectiveMonthlyCost, getReminderDaysLeft, isReminder } from '../utils/stats'
-import { getBrandColor, getServiceInitials } from '../utils/presets'
+import ServiceMark from './ServiceMark'
 import useModal from '../hooks/useModal'
 
-const NAV_ACTIONS = [
-  { id: 'nav-track', label: 'Go to Overview', icon: LayoutDashboard, tab: 'track', type: 'nav' },
-  { id: 'nav-list', label: 'Go to Subscriptions', icon: List, tab: 'list', type: 'nav' },
-  { id: 'nav-reminders', label: 'Go to Reminders', icon: BellRing, tab: 'reminders', type: 'nav' },
-  { id: 'nav-charts', label: 'Go to Insights', icon: BarChart3, tab: 'charts', type: 'nav' },
-  { id: 'nav-calendar', label: 'Go to Calendar', icon: CalendarDays, tab: 'calendar', type: 'nav' },
-  { id: 'nav-settings', label: 'Go to Settings', icon: Settings, tab: 'settings', type: 'nav' },
-  { id: 'action-add', label: 'Add new subscription', icon: Plus, tab: 'track', type: 'action' },
+const COMMANDS = [
+  { id: 'nav-track', label: 'Overview', icon: LayoutDashboard, tab: 'track', group: 'Go to' },
+  { id: 'nav-list', label: 'Subscriptions', icon: List, tab: 'list', group: 'Go to' },
+  { id: 'nav-reminders', label: 'Reminders', icon: BellRing, tab: 'reminders', group: 'Go to' },
+  { id: 'nav-charts', label: 'Insights', icon: BarChart3, tab: 'charts', group: 'Go to' },
+  { id: 'nav-calendar', label: 'Calendar', icon: CalendarDays, tab: 'calendar', group: 'Go to' },
+  { id: 'nav-settings', label: 'Settings', icon: Settings, tab: 'settings', group: 'Go to' },
+  { id: 'add-recurring', label: 'Add subscription', sublabel: 'A plan that renews on a cycle', icon: Plus, add: 'recurring', group: 'Actions', keywords: 'new create add' },
+  { id: 'add-reminder', label: 'Add reminder', sublabel: 'A one-time purchase with an end date', icon: Plus, add: 'reminder', group: 'Actions', keywords: 'new create add' },
 ]
+
+const MAX_RECORDS = 6
 
 function subSublabel(sub, baseCurrency) {
   const cat = getCategoryById(sub.category)
   if (isReminder(sub)) {
     const days = getReminderDaysLeft(sub)
     const phrase = days == null ? 'no end date' : days < 0 ? 'expired' : days === 0 ? 'ends today' : `ends in ${days}d`
-    return `${cat.label} · reminder · ${phrase}`
+    return `Reminder · ${cat.label} · ${phrase}`
   }
   return `${cat.label} · ${formatMoney(getEffectiveMonthlyCost(sub), sub.currency || baseCurrency)}/mo`
 }
 
-export default function CommandPalette({ open, onClose, subs, currency, onSwitchTab, onViewDetail, onAdd }) {
+export default function CommandPalette({ open, ...props }) {
+  return (
+    <AnimatePresence>
+      {open && <PaletteDialog key="palette" {...props} />}
+    </AnimatePresence>
+  )
+}
+
+// Mounted fresh each time the palette opens, so the query and selection
+// always start clean without a reset effect.
+function PaletteDialog({ onClose, subs, currency, onSwitchTab, onViewDetail, onAdd }) {
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
-  useModal(panelRef, { active: open, onClose, initialFocusRef: inputRef })
-  const listRef = useRef(null)
+  // While the palette fades out it still covers the page; let clicks through.
+  const isPresent = useIsPresent()
+  useModal(panelRef, { active: isPresent, onClose, initialFocusRef: inputRef })
 
-  useEffect(() => {
-    if (open) {
-      setQuery('')
-      setSelectedIdx(0)
-    }
-  }, [open])
-
-  const results = useMemo(() => {
+  const groups = useMemo(() => {
     const q = query.toLowerCase().trim()
-    const items = []
+    const out = []
 
-    // Match subscriptions
     if (q) {
-      const matchedSubs = subs.filter(s =>
+      const matches = subs.filter(s =>
         s.name.toLowerCase().includes(q) ||
         (s.notes && s.notes.toLowerCase().includes(q)) ||
         (s.tags && s.tags.some(t => t.toLowerCase().includes(q))) ||
         getCategoryById(s.category).label.toLowerCase().includes(q)
-      ).slice(0, 6)
-
-      matchedSubs.forEach(s => {
-        const brand = getBrandColor(s)
-        items.push({
-          id: `sub-${s.id}`,
-          label: s.name,
-          sublabel: subSublabel(s, currency),
-          mark: getServiceInitials(s.name),
-          iconColor: brand || '#e1ad66',
-          iconBg: brand ? `${brand}22` : 'rgba(225,173,102,0.1)',
-          type: 'sub',
-          data: s,
-        })
-      })
+      )
+      // Name matches first: a search for "net" should offer Netflix before a
+      // record that merely mentions it in a note.
+      matches.sort((a, b) => Number(b.name.toLowerCase().includes(q)) - Number(a.name.toLowerCase().includes(q)))
+      const records = matches.slice(0, MAX_RECORDS).map(s => ({
+        id: `sub-${s.id}`,
+        label: s.name,
+        sublabel: subSublabel(s, currency),
+        sub: s,
+      }))
+      if (records.length) out.push({ title: 'Records', items: records })
     }
 
-    // Match nav actions
-    const matchedActions = NAV_ACTIONS.filter(a =>
-      !q || a.label.toLowerCase().includes(q)
-    )
-    matchedActions.forEach(a => {
-      items.push({
-        id: a.id,
-        label: a.label,
-        sublabel: a.type === 'nav' ? 'Navigation' : 'Action',
-        icon: a.icon,
-        type: a.type,
-        tab: a.tab,
-      })
-    })
-
-    return items
+    for (const title of ['Go to', 'Actions']) {
+      const items = COMMANDS.filter(command => command.group === title
+        && (!q || `${command.label} ${command.group} ${command.keywords || ''}`.toLowerCase().includes(q)))
+      if (items.length) out.push({ title, items })
+    }
+    return out
   }, [query, subs, currency])
 
-  useEffect(() => {
-    setSelectedIdx(0)
-  }, [query])
+  const results = useMemo(() => groups.flatMap(group => group.items), [groups])
+  const activeIdx = Math.min(selectedIdx, Math.max(0, results.length - 1))
+  const activeId = results[activeIdx] ? `cmd-option-${results[activeIdx].id}` : undefined
 
   function handleSelect(item) {
-    if (item.type === 'sub') {
+    if (item.sub) {
       // Searching for a record is a lookup, not an edit — land on its detail
       // drawer, which has Edit one click away.
-      onViewDetail(item.data)
-    } else if (item.id === 'action-add') {
-      onAdd?.()
+      onViewDetail(item.sub)
+    } else if (item.add) {
+      onAdd?.(item.add)
     } else if (item.tab) {
       onSwitchTab(item.tab)
     }
@@ -108,117 +100,104 @@ export default function CommandPalette({ open, onClose, subs, currency, onSwitch
   function handleKeyDown(e) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSelectedIdx(i => Math.min(i + 1, results.length - 1))
+      setSelectedIdx(results.length ? (activeIdx + 1) % results.length : 0)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setSelectedIdx(i => Math.max(i - 1, 0))
-    } else if (e.key === 'Enter' && results[selectedIdx]) {
+      setSelectedIdx(results.length ? (activeIdx - 1 + results.length) % results.length : 0)
+    } else if (e.key === 'Enter' && results[activeIdx]) {
       e.preventDefault()
-      handleSelect(results[selectedIdx])
-    } else if (e.key === 'Escape') {
-      onClose()
+      handleSelect(results[activeIdx])
     }
   }
 
-  // Scroll selected item into view
+  // Keep the highlighted row in view while arrowing through a long list.
   useEffect(() => {
-    const list = listRef.current
-    if (!list) return
-    const selected = list.children[selectedIdx]
-    if (selected) selected.scrollIntoView({ block: 'nearest' })
-  }, [selectedIdx])
+    if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' })
+  }, [activeId])
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[90] flex items-start justify-center bg-black/60 px-4 pt-[14vh]"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ type: 'spring', damping: 30, stiffness: 400 }}
-            onClick={e => e.stopPropagation()}
-            ref={panelRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Command palette"
-            className="w-full max-w-[560px] overflow-hidden rounded-[20px] border border-[rgba(242,240,234,0.11)] bg-[#151412] shadow-[0_30px_80px_rgba(0,0,0,0.7)]"
-          >
-            {/* Search input */}
-            <div className="flex items-center gap-[11px] border-b px-[18px] py-[15px]" style={{ borderColor: 'rgba(242,240,234,0.07)' }}>
-              <Search className="h-4 w-4 flex-shrink-0 text-[rgba(242,240,234,0.4)]" />
-              <input
-                ref={inputRef}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Search subscriptions or jump to a page…"
-                className="min-w-0 flex-1 bg-transparent text-[14.5px] text-(--app-text) outline-none placeholder:text-[rgba(242,240,234,0.3)]"
-                aria-label="Command palette search"
-                role="combobox"
-                aria-expanded={results.length > 0}
-                aria-controls="cmd-palette-results"
-                aria-activedescendant={results[selectedIdx] ? `cmd-option-${results[selectedIdx].id}` : undefined}
-              />
-              <kbd className="hidden sm:block">Esc</kbd>
-            </div>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.13 }}
+      className="palette-backdrop z-[90]"
+      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
+      aria-hidden={isPresent ? undefined : true}
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 6 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        className="palette"
+      >
+        <div className="palette-input">
+          <Search aria-hidden="true" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => { setQuery(e.target.value); setSelectedIdx(0) }}
+            onKeyDown={handleKeyDown}
+            placeholder="Search subscriptions or jump to a page"
+            aria-label="Command palette search"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-controls="cmd-palette-results"
+            aria-activedescendant={activeId}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <kbd>Esc</kbd>
+        </div>
 
-            {/* Results */}
-            <div ref={listRef} id="cmd-palette-results" className="max-h-[340px] overflow-y-auto p-2" role={results.length ? 'listbox' : undefined}>
-              {results.length === 0 ? (
-                <p className="px-4 py-[26px] text-center text-[12.5px] text-[rgba(242,240,234,0.42)]">Nothing matches &ldquo;{query}&rdquo;.</p>
-              ) : (
-                results.map((item, idx) => {
-                  const Icon = item.icon
-                  const isSelected = idx === selectedIdx
-                  return (
-                    <button
-                      key={item.id}
-                      id={`cmd-option-${item.id}`}
-                      role="option"
-                      aria-selected={isSelected}
-                      onClick={() => handleSelect(item)}
-                      onMouseEnter={() => setSelectedIdx(idx)}
-                      className={`cmd-item w-full text-left ${isSelected ? 'selected' : ''}`}
-                    >
-                      <span
-                        className="font-figure grid h-[30px] w-[30px] flex-shrink-0 place-items-center rounded-[9px] text-[10.5px] font-semibold"
-                        style={{
-                          background: item.iconBg || 'rgba(242,240,234,0.06)',
-                          color: item.iconColor || 'rgba(242,240,234,0.6)',
-                        }}
-                      >
-                        {item.mark || (Icon ? <Icon className="h-3.5 w-3.5" /> : null)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13.5px] text-(--app-text)">{item.label}</span>
-                        {item.sublabel && (
-                          <span className="font-figure block truncate text-[10.5px] text-[rgba(242,240,234,0.4)]">{item.sublabel}</span>
-                        )}
-                      </span>
-                      <ArrowRight className={`h-3.5 w-3.5 flex-shrink-0 text-[rgba(242,240,234,0.35)] transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
-                    </button>
-                  )
-                })
-              )}
+        <div id="cmd-palette-results" className="palette-results" role={results.length ? 'listbox' : undefined} aria-label="Results">
+          {results.length === 0 ? (
+            <p className="palette-empty">Nothing matches &ldquo;{query}&rdquo;.</p>
+          ) : groups.map(group => (
+            <div key={group.title} role="group" aria-label={group.title}>
+              <h3 aria-hidden="true">{group.title}</h3>
+              {group.items.map(item => {
+                const Icon = item.icon
+                const isSelected = results[activeIdx] === item
+                return (
+                  <button
+                    key={item.id}
+                    id={`cmd-option-${item.id}`}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={-1}
+                    onClick={() => handleSelect(item)}
+                    onMouseMove={() => { if (!isSelected) setSelectedIdx(results.indexOf(item)) }}
+                    className="palette-item"
+                  >
+                    {item.sub
+                      ? <ServiceMark sub={item.sub} size={34} />
+                      : <span className="palette-icon"><Icon aria-hidden="true" /></span>}
+                    <span className="palette-text">
+                      <strong>{item.label}</strong>
+                      {item.sublabel && <small>{item.sublabel}</small>}
+                    </span>
+                    <CornerDownLeft className="palette-enter" aria-hidden="true" />
+                  </button>
+                )
+              })}
             </div>
+          ))}
+        </div>
 
-            {/* Footer hint */}
-            <div className="flex items-center gap-4 border-t px-[18px] py-2.5 text-[10px] text-[rgba(242,240,234,0.35)]" style={{ borderColor: 'rgba(242,240,234,0.07)' }}>
-              <span className="flex items-center gap-1.5"><kbd>↑↓</kbd> navigate</span>
-              <span className="flex items-center gap-1.5"><kbd>↵</kbd> select</span>
-              <span className="flex items-center gap-1.5"><kbd>Esc</kbd> close</span>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        <div className="palette-foot" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd> to move</span>
+          <span><kbd>Enter</kbd> to open</span>
+          <span><kbd>Esc</kbd> to close</span>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }

@@ -227,6 +227,10 @@ export function normalizeSubscription(input, options = {}) {
         : input.isTrial === true || requestedStatus === 'trial'
           ? 'trial'
           : 'active'
+  // Pausing a trial must not erase the fact that it is one: the flag rides
+  // along while paused so that resuming returns the record to "trial"
+  // instead of quietly promoting it to a paid subscription on the next load.
+  const isTrial = status === 'trial' || (status === 'paused' && input.isTrial === true)
 
   return {
     ...SUBSCRIPTION_DEFAULTS,
@@ -248,10 +252,10 @@ export function normalizeSubscription(input, options = {}) {
     tags: normalizeTags(input.tags),
     payment: text(input.payment),
     renewal: VALID_RENEWALS.has(input.renewal) ? input.renewal : 'auto',
-    isTrial: status === 'trial',
+    isTrial,
     // A trial converts on its billing date, so that is the end date when
     // none was given — a trial without one could never warn anybody.
-    trialEnd: optionalDate(input.trialEnd) || (status === 'trial' ? billingDate : null),
+    trialEnd: optionalDate(input.trialEnd) || (isTrial ? billingDate : null),
     isShared,
     sharedN: Math.max(1, finiteInteger(input.sharedN, 1)),
     sharedPct,

@@ -11,13 +11,13 @@ export const CYCLE_LABELS = {
   yearly: 'Yearly',
 }
 
-// Semantic palette of the black & gold theme: sage / gold / sand / terracotta.
-// Rendered as `.status-pill` with these inline colors.
+// Lifecycle states and the badge tone each one renders with (`.status.<tone>`
+// in index.css): ok = sage, accent = lavender, warn = amber, muted = grey.
 export const STATUS_STYLES = {
-  active: { label: 'Active', color: '#9ec8a0', bg: 'rgba(158,200,160,0.1)' },
-  trial: { label: 'Trial', color: '#e1ad66', bg: 'rgba(225,173,102,0.12)' },
-  paused: { label: 'Paused', color: '#d9c28b', bg: 'rgba(217,194,139,0.1)' },
-  canceled: { label: 'Canceled', color: 'rgba(242,240,234,0.45)', bg: 'rgba(242,240,234,0.07)' },
+  active: { label: 'Active', tone: 'ok' },
+  trial: { label: 'Trial', tone: 'accent' },
+  paused: { label: 'Paused', tone: 'warn' },
+  canceled: { label: 'Canceled', tone: 'muted' },
 }
 
 export function cycleLabel(cycle) {
@@ -69,15 +69,14 @@ export function paymentLabel(id) {
 }
 
 // One-time reminder lifecycle, keyed off the signed days until its end date.
-// Same semantic palette as STATUS_STYLES: sage = fine, sand = act soon,
-// terracotta = past due.
+// Same tones as STATUS_STYLES: ok = fine, warn = act soon, danger = past due.
 export const REMINDER_ENDING_SOON_DAYS = 30
 
 export function reminderState(days) {
-  if (days == null || Number.isNaN(days)) return { id: 'undated', label: 'No end date', color: 'rgba(242,240,234,0.45)', bg: 'rgba(242,240,234,0.07)' }
-  if (days < 0) return { id: 'expired', label: 'Expired', color: '#d99f8b', bg: 'rgba(217,159,139,0.12)' }
-  if (days <= REMINDER_ENDING_SOON_DAYS) return { id: 'soon', label: 'Ends soon', color: '#d9c28b', bg: 'rgba(217,194,139,0.12)' }
-  return { id: 'ok', label: 'Active', color: '#9ec8a0', bg: 'rgba(158,200,160,0.1)' }
+  if (days == null || Number.isNaN(days)) return { id: 'undated', label: 'No end date', tone: 'muted' }
+  if (days < 0) return { id: 'expired', label: 'Expired', tone: 'danger' }
+  if (days <= REMINDER_ENDING_SOON_DAYS) return { id: 'soon', label: 'Ends soon', tone: 'warn' }
+  return { id: 'ok', label: 'Active', tone: 'ok' }
 }
 
 // The palette chord is Cmd on a Mac and Ctrl everywhere else; labels should

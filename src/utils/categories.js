@@ -1,9 +1,9 @@
-// Mono gold ramp for ranked chart series (top spend first, descending).
-export const GOLD_RAMP = ['#facb8d', '#e1ad66', '#c28d41', '#a06f24', '#7d5411']
+// Single-hue ramp for ranked chart series (largest first, fading out).
+export const RANK_RAMP = ['#baa3e4', '#9c89c2', '#7f709f', '#63587c', '#4a425d']
 
-export const goldRampColor = (rank) => GOLD_RAMP[rank] || GOLD_RAMP[GOLD_RAMP.length - 1]
+export const rankColor = (rank) => RANK_RAMP[rank] || RANK_RAMP[RANK_RAMP.length - 1]
 
-// Visual identity (mark colors, icons) lives in ServiceMark / the gold ramp —
+// Visual identity (mark colors, icons) lives in ServiceMark / the rank ramp —
 // categories are only an id and a label now.
 export const CATEGORIES = [
   { id: 'streaming', label: 'Streaming' },

@@ -34,11 +34,16 @@ with personal finance data. SubTracker keeps things simple:
   and calendar export
 - **Responsive UI** for desktop and mobile
 - **Keyboard shortcuts and search** for faster navigation
+- **A calm, dark interface** — carbon surfaces, hairline borders and a single
+  lavender accent, in the same visual language as Slate Music
 
 ## Screenshots
 
 ### Overview
 ![Overview](docs/screenshots/overview.png)
+
+The hero shows the monthly commitment and the next 31 days of scheduled
+charges; the lists below are what is coming up and what needs a decision.
 
 ### Calendar
 ![Calendar](docs/screenshots/calendar.png)
@@ -50,8 +55,11 @@ with personal finance data. SubTracker keeps things simple:
 
 - React 19
 - Vite 7
-- Tailwind CSS 4
+- Tailwind CSS 4 (design tokens and utilities; components are plain CSS in
+  `src/index.css`)
 - Framer Motion
+- Inter, bundled with the app (`@fontsource-variable/inter`) — no font service
+  is contacted and the type works offline
 - Local Node.js server for disk-backed persistence
 
 ## Quick start
@@ -143,7 +151,7 @@ npm run check    # lint + tests + build
 
 ```text
 src/              React app source
-public/           static assets and fonts
+public/           static assets (icon, manifest, service worker)
 tests/            Node tests and browser-flow scripts
 server.mjs        local data server and backup logic
 launch.bat        Windows launcher

@@ -1,8 +1,9 @@
-﻿import React from 'react'
+import React from 'react'
 import { AlertTriangle, RotateCcw, Trash2, Download } from 'lucide-react'
 import { formatDateOnly } from '../utils/dates'
 import { buildBackupPayload, clearAllAppData } from '../utils/persistence'
 import { deleteServerData } from '../utils/syncServer'
+import { downloadBlob } from '../utils/download'
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -35,13 +36,7 @@ export default class ErrorBoundary extends React.Component {
         settings: read('st-settings', null),
         dismissed: read('st-dismissed', []),
       })
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `subtracker-recovery-${formatDateOnly(new Date())}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `subtracker-recovery-${formatDateOnly(new Date())}.json`)
     } catch (e) {
       console.error('Backup failed', e)
     }
@@ -61,30 +56,28 @@ export default class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV
       return (
-        <div className="min-h-screen bg-[#060605] flex items-center justify-center p-6">
-          <div className="glass max-w-lg space-y-4 p-8 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(217,159,139,0.12)]">
-              <AlertTriangle className="h-8 w-8 text-[#d99f8b]" />
-            </div>
-            <h2 className="font-figure text-xl font-medium text-(--app-text)">Something went wrong</h2>
-            <p className="break-words text-sm text-[rgba(242,240,234,0.55)]">{this.state.error?.message || 'An unexpected error occurred'}</p>
+        <main className="welcome">
+          <div className="welcome-card !max-w-[520px]" role="alert">
+            <AlertTriangle aria-hidden="true" />
+            <h1>Something went wrong</h1>
+            <p className="break-words">{this.state.error?.message || 'An unexpected error occurred'}</p>
             {isDev && this.state.info?.componentStack && (
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 text-left text-[10px] text-[rgba(242,240,234,0.4)]">{this.state.info.componentStack}</pre>
+              <pre className="mb-5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-[#0d0d0f] p-3 text-left text-[10px] text-dim">{this.state.info.componentStack}</pre>
             )}
-            <div className="flex flex-wrap justify-center gap-2.5 pt-2">
-              <button onClick={() => this.setState({ hasError: false, error: null, info: null })} className="btn btn-primary">
-                <RotateCcw className="h-4 w-4" /> Try again
+            <div className="flex flex-wrap justify-center gap-2.5">
+              <button type="button" onClick={() => this.setState({ hasError: false, error: null, info: null })} className="btn btn-primary">
+                <RotateCcw aria-hidden="true" /> Try again
               </button>
-              <button onClick={this.exportBackup} className="btn btn-secondary">
-                <Download className="h-4 w-4" /> Save backup
+              <button type="button" onClick={this.exportBackup} className="btn">
+                <Download aria-hidden="true" /> Save backup
               </button>
-              <button onClick={this.resetData} className="btn btn-danger">
-                <Trash2 className="h-4 w-4" /> Reset all data
+              <button type="button" onClick={this.resetData} className="btn btn-danger">
+                <Trash2 aria-hidden="true" /> Reset all data
               </button>
             </div>
-            <p className="pt-2 text-xs text-[rgba(242,240,234,0.4)]">Save a backup before resetting. The same file can be restored from Settings or onboarding.</p>
+            <p className="fine-print mt-5">Save a backup before resetting. The same file can be restored from Settings or onboarding.</p>
           </div>
-        </div>
+        </main>
       )
     }
     return this.props.children

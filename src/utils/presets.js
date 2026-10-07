@@ -37,20 +37,32 @@ export function getServiceInitials(name) {
   return String(name || '').split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 }
 
-// Find a preset by name (fuzzy match)
+const PRESET_INDEX = SERVICE_PRESETS.map(preset => {
+  const lower = preset.name.toLowerCase()
+  const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // The preset's full name as a run of whole words inside a longer name
+  // ("Netflix Premium", "Family Spotify plan").
+  return { preset, lower, within: new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`) }
+})
+
+// Find the preset a name refers to. Deliberately conservative: a loose
+// substring test made "On" resolve to Amazon Prime and left a half-typed
+// "New York Times" filed under Streaming because "Ne" had matched Netflix.
 export function findPreset(name) {
   const lower = String(name ?? '').trim().toLowerCase()
   if (!lower) return null
 
-  const exact = SERVICE_PRESETS.find(p => p.name.toLowerCase() === lower)
-  if (exact) return exact
+  const exact = PRESET_INDEX.find(entry => entry.lower === lower)
+  if (exact) return exact.preset
 
-  // One-character input is too ambiguous for fuzzy matching (and an empty
-  // string used to match Netflix because every string includes "").
-  if (lower.length < 2) return null
+  // Shorter fragments are too ambiguous to guess from.
+  if (lower.length < 3) return null
 
-  return SERVICE_PRESETS.find(p => p.name.toLowerCase().includes(lower)) ||
-    SERVICE_PRESETS.find(p => lower.includes(p.name.toLowerCase()))
+  // The name is the beginning of a preset ("Disney" → Disney+, "spot" →
+  // Spotify), or carries a preset's whole name inside it.
+  const match = PRESET_INDEX.find(entry => entry.lower.startsWith(lower))
+    || PRESET_INDEX.find(entry => entry.within.test(lower))
+  return match ? match.preset : null
 }
 
 // Auto-suggest category based on service name
@@ -62,6 +74,39 @@ export function suggestCategory(name) {
 
 // Get brand color for a subscription (from presets or category)
 export function getBrandColor(sub) {
-  const preset = findPreset(sub.name)
+  const preset = findPreset(sub?.name)
   return preset?.color || null
+}
+
+// ── Service mark colors ──
+// Brand colors were picked for white pages; several (PlayStation navy, Slack
+// aubergine, Apple TV grey) are close to invisible as text on the app's
+// near-black surface. Lift dark ones toward white until they read clearly.
+
+const MARK_FALLBACK = { color: '#baa3e4', background: 'rgba(186, 163, 228, 0.1)' }
+
+function parseHex(hex) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
+  if (!match) return null
+  const value = parseInt(match[1], 16)
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+function luminance([r, g, b]) {
+  const channel = value => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+export function getMarkColors(sub) {
+  const rgb = parseHex(getBrandColor(sub))
+  if (!rgb) return MARK_FALLBACK
+  let readable = rgb
+  for (let step = 0; step < 8 && luminance(readable) < 0.3; step++) {
+    readable = readable.map(value => Math.round(value + (255 - value) * 0.18))
+  }
+  const [r, g, b] = readable
+  return { color: `rgb(${r}, ${g}, ${b})`, background: `rgba(${r}, ${g}, ${b}, 0.13)` }
 }

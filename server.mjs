@@ -327,6 +327,16 @@ function serveStatic(req, res, pathname) {
   // Path traversal guard + SPA fallback for client-side routes.
   const withinDist = filePath === DIST_DIR || filePath.startsWith(DIST_DIR + path.sep)
   if (!withinDist || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    // Only extension-less paths are app routes. A missing *file* — typically
+    // a hashed chunk from a previous build that a cached page still asks for —
+    // must be a real 404: answering it with index.html handed the browser
+    // HTML where it expected JavaScript, and the service worker then cached
+    // that wrong answer under the script's URL.
+    if (path.extname(relative)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end('Not found')
+      return
+    }
     filePath = path.join(DIST_DIR, 'index.html')
   }
   if (!fs.existsSync(filePath)) {
@@ -342,6 +352,7 @@ function serveStatic(req, res, pathname) {
   res.writeHead(200, {
     'Content-Type': MIME[ext] || 'application/octet-stream',
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
+    'X-Content-Type-Options': 'nosniff',
   })
   if (req.method === 'HEAD') { res.end(); return }
   fs.createReadStream(filePath).on('error', () => res.destroy()).pipe(res)

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { MotionConfig } from 'framer-motion'
 import ErrorBoundary from './components/ErrorBoundary'
-import './fonts.css'
+import '@fontsource-variable/inter'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(

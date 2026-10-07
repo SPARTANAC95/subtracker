@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'subtracker-'
-const CACHE = 'subtracker-v5'
+const CACHE = 'subtracker-v6'
 const scoped = path => new URL(path, self.registration.scope).href
 const PRECACHE = [scoped('./'), scoped('index.html'), scoped('manifest.json'), scoped('icon.svg')]
 

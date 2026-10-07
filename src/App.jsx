@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } fro
 import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
 import {
   LayoutDashboard, List, BellRing, BarChart3, CalendarDays, Settings,
-  Volume2, VolumeX, Gem, Search, Plus, X
+  Volume2, VolumeX, Search, Plus, X
 } from 'lucide-react'
 import useLocalStorage from './hooks/useLocalStorage'
 import useAutoBackup from './hooks/useAutoBackup'
@@ -11,15 +11,14 @@ import useDayTick from './hooks/useDayTick'
 import useModal from './hooks/useModal'
 import { clearAllAppData, ensurePersistentStorage, parseBackupPayload } from './utils/persistence'
 import { playClick, playSuccess, playDelete, isEnabled, setEnabled } from './utils/sounds'
-import { formatMoney, makeSubConverter, pinSubscriptionCurrency } from './utils/currencies'
+import { makeSubConverter, pinSubscriptionCurrency } from './utils/currencies'
 import {
-  getDaysUntilBilling, getEffectiveMonthlyCost, getMissedOccurrences, getNextBillingDate,
+  getDaysUntilBilling, getMissedOccurrences, getNextBillingDate,
   isActiveSub, reactivateSubscription, recordSubscriptionPayment,
   undoSubscriptionPayment,
 } from './utils/stats'
-import { tabSlide } from './utils/motion'
 import { checkUpcomingBills } from './utils/notifications'
-import { formatDateOnly, formatDisplayDate } from './utils/dates'
+import { daysBetween, formatDateOnly, formatDisplayDate, parseLocalDate } from './utils/dates'
 import { MOD_KEY, plural } from './utils/labels'
 import { normalizeSettings } from './utils/settings'
 import {
@@ -35,7 +34,7 @@ import {
 
 import { ToastProvider } from './components/Toast'
 import { useToast } from './components/toast-context'
-import SaveIndicator from './components/SaveIndicator'
+import BrandMark from './components/BrandMark'
 import SetupWizard from './components/SetupWizard'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -48,17 +47,19 @@ const CalendarView = lazy(() => import('./components/CalendarView'))
 const RemindersPanel = lazy(() => import('./components/RemindersPanel'))
 const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
 
+// Order matters: the 1–6 shortcuts index into this list.
 const TABS = [
-  { id: 'track', label: 'Overview', icon: LayoutDashboard, num: '01' },
-  { id: 'list', label: 'Subscriptions', icon: List, num: '02' },
-  { id: 'reminders', label: 'Reminders', icon: BellRing, num: '03' },
-  { id: 'charts', label: 'Insights', icon: BarChart3, num: '04' },
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays, num: '05' },
-  { id: 'settings', label: 'Settings', icon: Settings, num: '06' },
+  { id: 'track', label: 'Overview', icon: LayoutDashboard },
+  { id: 'list', label: 'Subscriptions', icon: List },
+  { id: 'reminders', label: 'Reminders', icon: BellRing },
+  { id: 'charts', label: 'Insights', icon: BarChart3 },
+  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ]
+const SETTINGS_TAB = TABS[5]
+const MAIN_TABS = TABS.slice(0, 5)
 
-// Five slots only — Reminders and Settings stay reachable through the header
-// icons and the command palette on mobile.
+// Five slots only — Reminders and Settings sit in the mobile header instead.
 const MOBILE_NAV = [
   TABS[0],
   TABS[1],
@@ -71,8 +72,18 @@ const FULL_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   weekday: 'long',
   month: 'long',
   day: 'numeric',
-  year: 'numeric',
 })
+
+const UP_NEXT_COUNT = 4
+
+// Compact "when" for the sidebar's Up next list.
+function shortWhen(days, date) {
+  if (days < 0) return 'Overdue'
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  if (days < 7) return `${days} days`
+  return formatDisplayDate(date, SHORT_DATE)
+}
 
 const subsValidator = v => Array.isArray(v) && v.every(s => s && typeof s === 'object' && !Array.isArray(s))
 const settingsValidator = v => v === null || (v && typeof v === 'object' && !Array.isArray(v))
@@ -93,8 +104,7 @@ function AppInner() {
   const [soundOn, setSoundOn] = useState(isEnabled)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
-  const prevTabRef = useRef('track')
-  const direction = useRef(1)
+  const mainRef = useRef(null)
   const toast = useToast()
   const migratedRef = useRef(false)
   // Re-renders at local midnight and when the tab comes back on a new day,
@@ -145,17 +155,39 @@ function AppInner() {
   }, [subs, settings, today])
 
 
-  const tabIndex = TABS.findIndex(t => t.id === tab)
-  const prevIndex = TABS.findIndex(t => t.id === prevTabRef.current)
-  direction.current = tabIndex >= prevIndex ? 1 : -1
-
   const switchTab = useCallback((newTab) => {
-    prevTabRef.current = tab
     setTab(newTab)
     playClick()
+  }, [])
+
+  // A new page starts at its top; without this, switching from the bottom of
+  // a long list landed halfway down the next screen.
+  useEffect(() => {
+    mainRef.current?.scrollTo?.(0, 0)
+    window.scrollTo(0, 0)
   }, [tab])
 
+  // The soonest scheduled renewals, for the sidebar. Recomputed when the
+  // calendar day changes so "Tomorrow" and "Overdue" roll over with it.
+  const upNext = useMemo(() => {
+    const from = parseLocalDate(today) || new Date()
+    return (Array.isArray(subs) ? subs : [])
+      .filter(isActiveSub)
+      .map(sub => {
+        const date = getNextBillingDate(sub)
+        return { sub, date, days: daysBetween(from, date) }
+      })
+      .sort((a, b) => a.date - b.date)
+      .slice(0, UP_NEXT_COUNT)
+  }, [subs, today])
+
+  // Shortcuts only make sense once the main interface is on screen. Before
+  // that (loading, first-run setup) a stray "n" or "2" used to queue up a
+  // form or a tab switch that then appeared the moment setup finished.
+  const appReady = hydrated && sync.ready && Boolean(settings)
+
   useEffect(() => {
+    if (!appReady) return undefined
     function onKey(e) {
       // Synthetic events (autofill, some IMEs) can arrive without a key.
       const key = typeof e.key === 'string' ? e.key : ''
@@ -184,8 +216,8 @@ function AppInner() {
       if (key === '/') {
         e.preventDefault()
         switchTab('list')
-        // Land in the search box once the tab transition settles.
-        window.setTimeout(() => document.getElementById('subscription-search')?.focus(), 380)
+        // Land in the search box once the list has rendered.
+        window.setTimeout(() => document.getElementById('subscription-search')?.focus(), 60)
         return
       }
       if (key >= '1' && key <= '6') { switchTab(TABS[parseInt(key, 10) - 1]?.id || 'track'); return }
@@ -193,7 +225,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [cmdOpen, switchTab, showForm, shortcutsOpen, detailSub, tab])
+  }, [appReady, cmdOpen, switchTab, showForm, shortcutsOpen, detailSub, tab])
 
   // Wait for both browser storage AND the first server handshake — otherwise
   // a new browser would flash the setup wizard before disk data arrives.
@@ -213,7 +245,6 @@ function AppInner() {
   }
 
   const currency = settings.currency || 'USD'
-  const monthlyTotal = subs.filter(isActiveSub).reduce((a, s) => a + toBase(getEffectiveMonthlyCost(s), s), 0)
   // Recurring records and one-time reminders share the store but live in
   // separate tabs — split once here so counts and lists stay consistent.
   const recurringSubs = subs.filter(s => !isReminder(s))
@@ -515,16 +546,17 @@ function AppInner() {
     const report = normalizeSubscriptionsWithReport(parsed.subs, { genId: createSubscriptionId, mode: 'strict', requireAmount: true })
     const valid = report.items
     if (!valid.length && parsed.subs.length) { toast.error('Backup has no valid subscriptions'); return }
+    const skipped = report.rejected.length
     const ok = await toast.confirm(
-      `Restore ${valid.length} subscriptions?`,
-      `This replaces your current data with the backup file contents.${report.rejected.length ? ` ${report.rejected.length} invalid records will be skipped. The original backup file is unchanged.` : ''}`
+      `Restore ${valid.length} ${plural(valid.length, 'subscription')}?`,
+      `This replaces your current data with the backup file contents.${skipped ? ` ${skipped} invalid ${plural(skipped, 'record')} will be skipped. The original backup file is unchanged.` : ''}`
     )
     if (!ok) return
     setSubs(valid)
     if (parsed.settings) setSettings(normalizeSettings(parsed.settings))
     if (Array.isArray(parsed.dismissed)) setDismissed(parsed.dismissed)
     playSuccess()
-    toast.success(`Restored ${valid.length} subscriptions from backup`)
+    toast.success(`Restored ${valid.length} ${plural(valid.length, 'subscription')} from backup`)
   }
   function toggleSound() { const next = !soundOn; setSoundOn(next); setEnabled(next); if (next) playClick() }
 
@@ -533,120 +565,118 @@ function AppInner() {
     : subsStatus === 'quota' || settingsStatus === 'quota' ? 'quota'
     : subsStatus === 'degraded' || settingsStatus === 'degraded' ? 'degraded' : 'saved'
 
-  const activeTab = TABS.find(item => item.id === tab) || TABS[0]
   const todayLabel = FULL_DATE_FORMATTER.format(new Date())
   const addLabel = addKind === 'reminder' ? 'Add reminder' : 'Add subscription'
 
-  // The storage card reports the strongest layer that is working: the disk
+  // The status line reports the strongest layer that is working: the disk
   // file when the local server is running, browser storage otherwise.
   const diskMode = sync.available
-  // Short on purpose: the rail card is narrow and this line is uppercase
-  // letterspaced — "Saved on this computer" wrapped onto three lines.
-  const storageTitle = diskMode ? 'Saved on this PC' : 'In this browser'
   const storageStatus = diskMode && ['offline', 'conflict'].includes(sync.status) ? 'degraded' : saveStatus
-  const localSaveLabel = saveStatus === 'saving' || sync.status === 'saving' ? 'Saving changes...'
-    : sync.status === 'conflict' ? 'Another browser changed the file — open Settings'
-    : diskMode && sync.status === 'offline' ? 'Server unavailable — retrying automatically'
+  const localSaveLabel = saveStatus === 'saving' || sync.status === 'saving' ? 'Saving changes…'
+    : sync.status === 'conflict' ? 'File changed elsewhere — open Settings'
+    : diskMode && sync.status === 'offline' ? 'Server unavailable — retrying'
     : saveStatus === 'quota' ? 'Local storage is full'
     : saveStatus === 'error' || saveStatus === 'degraded' ? 'Backup layer needs attention'
-    : diskMode ? 'Everything is saved to your data file'
-    : 'All changes saved on this device'
+    : diskMode ? 'All changes saved to disk'
+    : 'All changes saved in this browser'
+  const statusTone = storageStatus === 'saved' || storageStatus === 'saving' ? '' : storageStatus === 'degraded' ? 'warn' : 'danger'
+
+  function navItem(item, extraClass = '') {
+    const Icon = item.icon
+    const isActive = tab === item.id
+    const count = item.id === 'list' ? recurringSubs.length : item.id === 'reminders' ? reminderSubs.length : 0
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => switchTab(item.id)}
+        className={`nav-item ${isActive ? 'active' : ''} ${extraClass}`}
+        aria-current={isActive ? 'page' : undefined}
+      >
+        <Icon aria-hidden="true" />
+        <span>{item.label}</span>
+        {count > 0 && <em>{count}</em>}
+      </button>
+    )
+  }
 
   return (
-    <>
-      {/* Desktop navigation rail */}
-      <aside className="app-sidebar hidden lg:flex">
-        <button type="button" className="app-brand" onClick={() => switchTab('track')} aria-label="Go to Overview">
-          <span className="app-brand-mark"><Gem aria-hidden="true" /></span>
-          <span className="app-brand-name">SubTracker<sup>PRO</sup></span>
+    <div className="app" data-page={tab}>
+      {/* Desktop sidebar */}
+      <aside className="sidebar">
+        <button type="button" className="brand" onClick={() => switchTab('track')} aria-label="Go to Overview">
+          <BrandMark />
+          <span>sub<span className="brand-light">tracker</span></span>
         </button>
 
-        <nav className="app-sidebar-nav" aria-label="Primary navigation">
-          {TABS.map(item => {
-            const isActive = tab === item.id
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => switchTab(item.id)}
-                className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-                aria-current={isActive ? 'page' : undefined}
-              >
-                <span className="sidebar-nav-num" aria-hidden="true">{item.num}</span>
-                <span>{item.label}</span>
-                {item.id === 'list' && recurringSubs.length > 0 && (
-                  <span className="font-figure ml-auto text-[10.5px] text-[rgba(242,240,234,0.35)]">{recurringSubs.length}</span>
-                )}
-                {item.id === 'reminders' && reminderSubs.length > 0 && (
-                  <span className="font-figure ml-auto text-[10.5px] text-[rgba(242,240,234,0.35)]">{reminderSubs.length}</span>
-                )}
+        <nav className="sidebar-nav" aria-label="Primary navigation">
+          {MAIN_TABS.map(item => navItem(item))}
+
+          <p className="sidebar-heading" id="up-next-heading">Up next</p>
+          <div className="sidebar-list" role="group" aria-labelledby="up-next-heading">
+            {upNext.length ? upNext.map(({ sub, date, days }) => (
+              <button key={sub.id} type="button" className="upnext-link" onClick={() => setDetailSub(sub)}>
+                <i className={days < 0 ? 'overdue' : days <= 1 ? 'due' : ''} aria-hidden="true" />
+                <span>{sub.name}</span>
+                <small className={days < 0 ? 'overdue' : ''}>{shortWhen(days, date)}</small>
               </button>
-            )
-          })}
+            )) : <p>Renewals appear here once you add a subscription.</p>}
+          </div>
+
+          {navItem(SETTINGS_TAB, 'nav-bottom')}
         </nav>
 
-        <div className="app-sidebar-footer">
-          <button type="button" onClick={() => openAddForm()} className="app-primary-button app-sidebar-add">
-            <Plus aria-hidden="true" />
-            <span>{addLabel}</span>
+        <div className="sidebar-status" data-status={storageStatus} role="status">
+          <span className={`status-dot ${statusTone} ${storageStatus === 'saving' ? 'pulsing' : ''}`} aria-hidden="true" />
+          <span title={localSaveLabel}>{localSaveLabel}</span>
+          <button type="button" onClick={toggleSound} className="btn btn-icon" aria-label={soundOn ? 'Mute sounds' : 'Enable sounds'}>
+            {soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
           </button>
-
-          <div className="app-local-card" data-status={storageStatus} aria-live="polite">
-            <div className="app-local-card-head">
-              <span className="app-local-dot" aria-hidden="true" />
-              <div>
-                <p>{storageTitle}</p>
-                <span>{localSaveLabel}</span>
-              </div>
-              <SaveIndicator status={storageStatus} />
-            </div>
-            <div className="app-local-card-meta">
-              <div>
-                <span>Monthly commitment</span>
-                <strong>{formatMoney(monthlyTotal, currency)}</strong>
-              </div>
-              <button type="button" onClick={toggleSound} className="app-icon-button" aria-label={soundOn ? 'Mute sounds' : 'Enable sounds'}>
-                {soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
-              </button>
-            </div>
-          </div>
         </div>
       </aside>
 
-      <div className="app-shell" data-page={tab}>
-        {/* Desktop global header */}
-        <header className="app-desktop-header hidden lg:flex">
-          <div className="app-desktop-header-inner">
-            <h1>{activeTab.label}</h1>
-            <div className="app-header-actions">
-              <time dateTime={formatDateOnly(new Date())} className="max-[1100px]:hidden">{todayLabel}</time>
-              <button type="button" onClick={() => setCmdOpen(true)} className="app-search-button" aria-label="Search subscriptions">
-                <Search aria-hidden="true" />
-                <span>Search…</span>
-                <kbd>{MOD_KEY} K</kbd>
-              </button>
-              <button type="button" onClick={() => openAddForm()} className="app-primary-button">
-                <Plus aria-hidden="true" />
-                <span>{addLabel}</span>
-              </button>
-            </div>
+      <div className="main" ref={mainRef}>
+        {/* Desktop top bar */}
+        <header className="topbar">
+          <div className="crumbs">
+            <time dateTime={formatDateOnly(new Date())}>{todayLabel}</time>
+          </div>
+          <button type="button" onClick={() => setCmdOpen(true)} className="search-box" aria-label="Search subscriptions">
+            <Search aria-hidden="true" />
+            <span>Search subscriptions</span>
+            <kbd>{MOD_KEY} K</kbd>
+          </button>
+          <div className="topbar-actions">
+            <button type="button" onClick={() => openAddForm()} className="btn btn-primary">
+              <Plus aria-hidden="true" />
+              <span>{addLabel}</span>
+            </button>
           </div>
         </header>
 
-        {/* Mobile global header */}
-        <header className="app-mobile-header lg:hidden">
-          <button type="button" className="app-brand" onClick={() => switchTab('track')} aria-label="Go to Overview">
-            <span className="app-brand-mark"><Gem aria-hidden="true" /></span>
-            <span className="app-brand-name">SubTracker<sup>PRO</sup></span>
+        {/* Mobile header */}
+        <header className="mobile-header">
+          <button type="button" className="brand" onClick={() => switchTab('track')} aria-label="Go to Overview">
+            <BrandMark />
+            <span>sub<span className="brand-light">tracker</span></span>
           </button>
-          <div className="app-mobile-header-actions">
-            <button type="button" onClick={() => setCmdOpen(true)} className="app-icon-button" aria-label="Search subscriptions">
+          <div className="mobile-header-actions">
+            <button type="button" onClick={() => setCmdOpen(true)} className="btn btn-icon" aria-label="Search subscriptions">
               <Search aria-hidden="true" />
             </button>
             <button
               type="button"
+              onClick={() => switchTab('reminders')}
+              className={`btn btn-icon ${tab === 'reminders' ? 'active' : ''}`}
+              aria-label="Open Reminders"
+              aria-current={tab === 'reminders' ? 'page' : undefined}
+            >
+              <BellRing aria-hidden="true" />
+            </button>
+            <button
+              type="button"
               onClick={() => switchTab('settings')}
-              className={`app-icon-button ${tab === 'settings' ? 'active' : ''}`}
+              className={`btn btn-icon ${tab === 'settings' ? 'active' : ''}`}
               aria-label="Open Settings"
               aria-current={tab === 'settings' ? 'page' : undefined}
             >
@@ -655,79 +685,57 @@ function AppInner() {
           </div>
         </header>
 
-        <main id="main-content" className="app-content">
+        {/* Keyed on the page so each one fades in, and on the calendar day:
+            when the date rolls over, every memoised model (dashboard, list,
+            calendar, insights) is rebuilt against the new "today" instead of
+            showing yesterday's numbers. */}
+        <main id="main-content" className="page-content" key={`${tab}-${today}`}>
           {['conflict', 'offline'].includes(sync.status) && (
-            <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#d9c28b]/30 bg-[#d9c28b]/10 px-4 py-3 text-xs leading-5 text-[#d9c28b]">
+            <div role="status" className="notice">
               <span>{sync.status === 'conflict' ? 'Another browser changed the data file. Your changes are kept in this browser.' : 'The data server is unavailable. Changes stay in this browser while SubTracker retries.'}</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => switchTab('settings')}>Review saving</button>
+              <button type="button" className="btn btn-sm" onClick={() => switchTab('settings')}>Review saving</button>
             </div>
           )}
-          <div className="app-mobile-page-heading lg:hidden">
-            <h1>{activeTab.label}</h1>
-            <time dateTime={formatDateOnly(new Date())}>{todayLabel}</time>
-          </div>
 
-          {/* Keyed on the calendar day: when the date rolls over, every
-              memoised model (dashboard, list, calendar, insights) is rebuilt
-              against the new "today" instead of showing yesterday's numbers. */}
-          <Suspense fallback={<PanelLoading />} key={today}>
-          <AnimatePresence mode="wait">
+          <Suspense fallback={<PanelLoading />}>
             {tab === 'track' && (
-              <motion.div key="track" {...tabSlide(direction.current)}>
-                <Dashboard
-                  subs={subs}
-                  settings={settings}
-                  onAddClick={() => openAddForm('recurring')}
-                  onMarkPaid={handleMarkPaid}
-                  onViewDetail={setDetailSub}
-                  onOpenCalendar={() => switchTab('calendar')}
-                  onOpenSubscriptions={() => switchTab('list')}
-                  onOpenReminders={() => switchTab('reminders')}
-                  onOpenSettings={() => switchTab('settings')}
-                  today={today}
-                />
-              </motion.div>
+              <Dashboard
+                subs={subs}
+                settings={settings}
+                onAddClick={() => openAddForm('recurring')}
+                onMarkPaid={handleMarkPaid}
+                onViewDetail={setDetailSub}
+                onOpenCalendar={() => switchTab('calendar')}
+                onOpenSubscriptions={() => switchTab('list')}
+                onOpenReminders={() => switchTab('reminders')}
+                onOpenSettings={() => switchTab('settings')}
+                today={today}
+              />
             )}
             {tab === 'list' && (
-              <motion.div key="list" {...tabSlide(direction.current)}>
-                <SubscriptionList subs={recurringSubs} currency={currency} toBase={toBase} onAdd={() => openAddForm('recurring')} onEdit={handleEditSub} onDelete={handleDeleteSub} onTogglePause={handleTogglePause} onMarkPaid={handleMarkPaid} onReactivate={handleReactivate} onViewDetail={setDetailSub} onBulkPause={handleBulkPause} onBulkResume={handleBulkResume} onBulkDelete={handleBulkDelete} onBulkReactivate={handleBulkReactivate} />
-              </motion.div>
+              <SubscriptionList subs={recurringSubs} currency={currency} toBase={toBase} activeId={detailSub?.id || null} onAdd={() => openAddForm('recurring')} onEdit={handleEditSub} onDelete={handleDeleteSub} onTogglePause={handleTogglePause} onMarkPaid={handleMarkPaid} onReactivate={handleReactivate} onViewDetail={setDetailSub} onBulkPause={handleBulkPause} onBulkResume={handleBulkResume} onBulkDelete={handleBulkDelete} onBulkReactivate={handleBulkReactivate} />
             )}
             {tab === 'reminders' && (
-              <motion.div key="reminders" {...tabSlide(direction.current)}>
-                <RemindersPanel reminders={reminderSubs} currency={currency} toBase={toBase} onAdd={() => openAddForm('reminder')} onEdit={handleEditSub} onDelete={handleDeleteSub} onViewDetail={setDetailSub} />
-              </motion.div>
+              <RemindersPanel reminders={reminderSubs} currency={currency} toBase={toBase} onAdd={() => openAddForm('reminder')} onEdit={handleEditSub} onDelete={handleDeleteSub} onViewDetail={setDetailSub} />
             )}
-            {tab === 'charts' && (
-              <motion.div key="charts" {...tabSlide(direction.current)}>
-                <AnalyticsPanel key={today} subs={subs} settings={settings} />
-              </motion.div>
-            )}
-            {tab === 'calendar' && (
-              <motion.div key="calendar" {...tabSlide(direction.current)}>
-                <CalendarView key={today} subs={subs} currency={currency} toBase={toBase} />
-              </motion.div>
-            )}
+            {tab === 'charts' && <AnalyticsPanel subs={subs} settings={settings} />}
+            {tab === 'calendar' && <CalendarView subs={subs} currency={currency} toBase={toBase} onViewDetail={setDetailSub} />}
             {tab === 'settings' && (
-              <motion.div key="settings" {...tabSlide(direction.current)}>
-                <SettingsPanel settings={settings} onUpdateSettings={handleUpdateSettings} subs={subs} dismissed={dismissed} onImport={handleImport} onClearAll={handleClearAll} backup={backup} onRestore={handleRestore} sync={sync} />
-              </motion.div>
+              <SettingsPanel settings={settings} onUpdateSettings={handleUpdateSettings} subs={subs} dismissed={dismissed} onImport={handleImport} onClearAll={handleClearAll} backup={backup} onRestore={handleRestore} sync={sync} soundOn={soundOn} onToggleSound={toggleSound} />
             )}
-          </AnimatePresence>
           </Suspense>
         </main>
       </div>
 
       {/* Mobile bottom navigation */}
-      <nav className="app-mobile-nav lg:hidden" aria-label="Mobile navigation">
-        <div className="app-mobile-nav-inner">
+      <nav className="mobile-nav" aria-label="Mobile navigation">
+        <div className="mobile-nav-inner">
           {MOBILE_NAV.map(item => {
             const Icon = item.icon
             if (item.action === 'add') {
               return (
-                <button key={item.id} type="button" onClick={() => openAddForm()} className="app-mobile-add" aria-label={addLabel}>
+                <button key={item.id} type="button" onClick={() => openAddForm()} className="mobile-add" aria-label={addLabel}>
                   <span><Icon aria-hidden="true" /></span>
-                  <strong>{item.label}</strong>
                 </button>
               )
             }
@@ -738,7 +746,7 @@ function AppInner() {
                 key={item.id}
                 type="button"
                 onClick={() => switchTab(item.id)}
-                className={`app-mobile-nav-item ${isActive ? 'active' : ''}`}
+                className={`mobile-nav-item ${isActive ? 'active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <Icon aria-hidden="true" />
@@ -749,10 +757,10 @@ function AppInner() {
         </div>
       </nav>
 
-      {/* ── Form Slide-over ── */}
+      {/* ── Add / edit form ── */}
       <AnimatePresence>
         {showForm && (
-          <FormSlideOver
+          <FormModal
             key="form"
             title={editSub
               ? (isReminder(editSub) ? 'Edit reminder' : 'Edit subscription')
@@ -760,17 +768,17 @@ function AppInner() {
             onClose={closeForm}
           >
             <SubscriptionForm onAdd={handleAddSub} currency={currency} editData={editSub} initialKind={formKind} onCancelEdit={closeForm} />
-          </FormSlideOver>
+          </FormModal>
         )}
       </AnimatePresence>
 
-      {/* ── Other Overlays ── */}
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} subs={subs} currency={currency} onSwitchTab={switchTab} onViewDetail={setDetailSub} onAdd={() => openAddForm()} />
+      {/* ── Other overlays ── */}
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} subs={subs} currency={currency} onSwitchTab={switchTab} onViewDetail={setDetailSub} onAdd={openAddForm} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <AnimatePresence>
         {detailSub && <SubscriptionDetail sub={subs.find(s => s.id === detailSub.id) || detailSub} currency={currency} toBase={toBase} onClose={() => setDetailSub(null)} onEdit={handleEditSub} onDelete={handleDeleteSub} onTogglePause={handleTogglePause} onMarkPaid={handleMarkPaid} onReactivate={handleReactivate} />}
       </AnimatePresence>
-    </>
+    </div>
   )
 }
 
@@ -782,10 +790,12 @@ export default function App() {
   )
 }
 
-function FormSlideOver({ title, onClose, children }) {
+function FormModal({ title, onClose, children }) {
   const panelRef = useRef(null)
-  // Direct child of AnimatePresence: while the panel slides out, its
-  // full-screen backdrop must not swallow the click that follows.
+  // Direct child of AnimatePresence: while the dialog fades out, its
+  // full-screen backdrop must not swallow the click that follows, and it is
+  // hidden from assistive tech so a closing dialog is never announced
+  // alongside the one replacing it (detail panel → edit form).
   const isPresent = useIsPresent()
   useModal(panelRef, { active: isPresent, onClose })
   return (
@@ -793,26 +803,27 @@ function FormSlideOver({ title, onClose, children }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[70] bg-black/65"
+      transition={{ duration: 0.15 }}
+      className="modal-backdrop sheet z-[70]"
       style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      onClick={onClose}
+      aria-hidden={isPresent ? undefined : true}
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
       <motion.div
-        initial={{ x: '110%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '110%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-        onClick={e => e.stopPropagation()}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 8 }}
+        transition={{ duration: 0.17, ease: 'easeOut' }}
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="subscription-form-title"
-        className="app-panel w-[calc(100%-24px)] max-w-[432px] overflow-y-auto"
+        className="modal"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[rgba(242,240,234,0.07)] bg-[rgba(19,18,16,0.94)] px-[22px] pb-3.5 pt-[18px] backdrop-blur-md">
-          <h2 id="subscription-form-title" className="text-[17px] font-semibold text-(--app-text)">{title}</h2>
-          <button onClick={onClose} className="btn btn-secondary btn-icon" aria-label="Close">
-            <X className="h-4 w-4" />
+        <div className="modal-head">
+          <h2 id="subscription-form-title">{title}</h2>
+          <button type="button" onClick={onClose} className="btn btn-icon" aria-label="Close">
+            <X aria-hidden="true" />
           </button>
         </div>
         {children}
@@ -823,10 +834,10 @@ function FormSlideOver({ title, onClose, children }) {
 
 function LoadingScreen() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#060605]">
-      <div className="flex items-center gap-3 text-sm text-(--app-muted)">
-        <Gem className="w-5 h-5 text-[#e1ad66]" />
-        <span>Loading SubTracker...</span>
+    <div className="welcome" role="status">
+      <div className="flex items-center gap-3 text-muted">
+        <BrandMark width={24} height={24} />
+        <span>Loading SubTracker…</span>
       </div>
     </div>
   )
@@ -834,10 +845,8 @@ function LoadingScreen() {
 
 function PanelLoading() {
   return (
-    <div className="glass flex min-h-56 items-center justify-center" role="status">
-      <div className="flex items-center gap-3 text-sm text-(--app-muted)">
-        <Gem className="h-4 w-4 text-[#e1ad66]" /> Loading this view...
-      </div>
+    <div className="empty compact" role="status">
+      <p>Loading this view…</p>
     </div>
   )
 }

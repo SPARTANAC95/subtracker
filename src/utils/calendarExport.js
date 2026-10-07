@@ -1,9 +1,10 @@
 import { addDays, addMonthsClamped, formatDateOnly, parseLocalDate, startOfDay } from './dates.js'
 import { getBillsInRange } from './stats.js'
 import { isCanceled, isReminder } from './subscriptions.js'
+import { downloadBlob } from './download.js'
 
 function escapeIcs(value) {
-  return String(value ?? '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
 }
 
 function icsDay(value) {
@@ -82,10 +83,5 @@ export function buildCalendarIcs(subs, options = {}) {
 
 export function downloadCalendarIcs(subs) {
   const blob = new Blob([buildCalendarIcs(subs)], { type: 'text/calendar;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `subtracker-renewals-${formatDateOnly(new Date())}.ics`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadBlob(blob, `subtracker-renewals-${formatDateOnly(new Date())}.ics`)
 }

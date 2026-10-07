@@ -1,13 +1,12 @@
 {
-  "name": "SubTracker Pro",
+  "name": "SubTracker",
   "short_name": "SubTracker",
   "description": "Track, analyze, and optimize all your subscriptions",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#060605",
-  "theme_color": "#060605",
+    "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
   "categories": ["finance", "productivity", "utilities"],
   "icons": [
     {
