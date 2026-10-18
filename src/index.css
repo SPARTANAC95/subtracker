@@ -1673,6 +1673,16 @@
     font-weight: 650;
     color: #fff;
   }
+  /* Past days: settled ones read as done, missed ones as a problem. */
+  .cal-cell.settled small {
+    color: var(--color-ok);
+  }
+  .cal-cell.overdue {
+    border-color: #6b3a3a;
+  }
+  .cal-cell.overdue small {
+    color: var(--color-danger);
+  }
   .cal-cell[aria-pressed='true'] {
     border-color: var(--color-accent);
   }
@@ -1689,6 +1699,24 @@
     width: 12px;
     height: 12px;
     border-radius: 3px;
+  }
+  .cal-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 10px;
+  }
+  .cal-key::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .cal-key.paid::before {
+    background: var(--color-ok);
+  }
+  .cal-key.overdue::before {
+    background: var(--color-danger);
   }
 
   /* Settings */

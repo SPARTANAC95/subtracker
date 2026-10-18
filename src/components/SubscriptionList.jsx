@@ -57,31 +57,43 @@ function renewalTimestamp(sub) {
   return value?.getTime?.() || Number.MAX_SAFE_INTEGER
 }
 
+// Each status tab already shows a single lifecycle state, so the badge
+// reports where the record stands in its schedule instead — the same words
+// the overview uses (Overdue, Due, Scheduled, Trial ends).
 function renewalInfo(sub) {
   const status = getSubscriptionStatus(sub)
   if (status === 'canceled') {
     return {
       primary: '—',
       secondary: sub.canceledAt ? `Canceled ${formatDisplayDate(sub.canceledAt, LONG_DATE)}` : 'Canceled',
+      badge: STATUS_STYLES.canceled,
     }
   }
 
   if (status === 'trial' && sub.trialEnd) {
     const end = parseLocalDate(sub.trialEnd)
     const days = end ? daysBetween(new Date(), end) : null
+    const ended = days != null && days < 0
     return {
       primary: formatDisplayDate(end, LONG_DATE),
-      secondary: days == null ? 'Trial ending' : days < 0 ? 'Trial ended' : days === 0 ? 'Ends today' : days === 1 ? 'Ends tomorrow' : `Ends in ${days} days`,
-      overdue: days != null && days < 0,
+      secondary: days == null ? 'Trial ending' : ended ? 'Trial ended' : days === 0 ? 'Ends today' : days === 1 ? 'Ends tomorrow' : `Ends in ${days} days`,
+      overdue: ended,
+      badge: ended ? { label: 'Trial ended', tone: 'danger' } : { label: 'Trial ends', tone: 'accent' },
     }
   }
 
   const next = getNextBillingDate(sub)
   const days = getDaysUntilBilling(sub)
+  const overdue = status === 'active' && days < 0
   return {
     primary: formatDisplayDate(next, LONG_DATE),
     secondary: status === 'paused' ? 'Schedule paused' : relativeDay(days),
-    overdue: status === 'active' && days < 0,
+    overdue,
+    badge: status === 'paused' ? STATUS_STYLES.paused
+      : status === 'trial' ? STATUS_STYLES.trial
+      : overdue ? { label: 'Overdue', tone: 'danger' }
+      : days <= 1 ? { label: 'Due', tone: 'warn' }
+      : { label: 'Scheduled', tone: 'ok' },
   }
 }
 
@@ -404,7 +416,7 @@ function DesktopRow({ sub, currency, toBase, selected, active, menuOpen, onToggl
           </span>
         </button>
       </td>
-      <td><StatusBadge tone={STATUS_STYLES[status].tone}>{STATUS_STYLES[status].label}</StatusBadge></td>
+      <td><StatusBadge tone={info.badge.tone}>{info.badge.label}</StatusBadge></td>
       <td>
         <span className="num text-soft">{info.primary}</span>
         <span className={`sub ${info.overdue ? 'danger' : ''}`}>{info.secondary}</span>
@@ -453,7 +465,7 @@ function MobileRow({ sub, currency, toBase, selected, active, menuOpen, onToggle
         />
       </div>
       <button type="button" onClick={onOpen} tabIndex={-1} aria-hidden="true" className="mt-2.5 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pl-[27px] text-left">
-        <StatusBadge tone={STATUS_STYLES[status].tone}>{STATUS_STYLES[status].label}</StatusBadge>
+        <StatusBadge tone={info.badge.tone}>{info.badge.label}</StatusBadge>
         <span className="min-w-0">
           <span className="num block truncate text-[12px] text-soft">{info.primary}</span>
           <span className={`block truncate text-[10.5px] ${info.overdue ? 'text-danger' : 'text-dim'}`}>{info.secondary}</span>

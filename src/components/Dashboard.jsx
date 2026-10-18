@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { AlertTriangle, ArrowRight, BellRing, CalendarDays, Check, ChevronRight, Clock3, Plus, Target } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BellRing, CalendarDays, Check, ChevronRight, Clock3, Eye, Plus, Target } from 'lucide-react'
 import { formatMoney, makeSubConverter } from '../utils/currencies'
 import {
   getCategoryBreakdown,
@@ -378,7 +378,9 @@ function RenewalRow({ item, currency, onOpen, onPaid }) {
             <Check aria-hidden="true" /> Paid
           </button>
         ) : (
-          <button type="button" onClick={onOpen} className="btn btn-sm btn-ghost">Review</button>
+          <button type="button" onClick={onOpen} className="btn btn-sm">
+            <Eye aria-hidden="true" /> Review
+          </button>
         )}
       </div>
     </div>

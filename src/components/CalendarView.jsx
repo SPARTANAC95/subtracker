@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { formatMoney } from '../utils/currencies'
-import { getBillsInRange, getEffectiveAmount, isActiveSub } from '../utils/stats'
+import { getBillsInRange, getEffectiveAmount, getMissedOccurrences, isActiveSub } from '../utils/stats'
 import { getSubscriptionStatus, isCanceled, isReminder } from '../utils/subscriptions'
-import { parseLocalDate } from '../utils/dates'
+import { formatDateOnly, parseLocalDate, startOfDay } from '../utils/dates'
 import { plural } from '../utils/labels'
 import { downloadCalendarIcs } from '../utils/calendarExport'
 import PageHeading from './PageHeading'
@@ -11,9 +11,24 @@ import ServiceMark from './ServiceMark'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-function eventLabel(sub) {
-  if (isReminder(sub)) return 'Ends — one-time purchase'
-  return getSubscriptionStatus(sub) === 'trial' ? 'Trial ends' : 'Scheduled renewal'
+// What happened (or will happen) on a day, per subscription. Past renewals
+// are either settled by a recorded payment or still overdue — showing both as
+// "scheduled" hid the one thing a past date can tell you.
+const EVENT_LABELS = {
+  renewal: 'Scheduled renewal',
+  paid: 'Paid',
+  overdue: 'Overdue — not marked paid',
+  trial: 'Trial ends',
+  ends: 'Ends — one-time purchase',
+}
+
+// A renewal date's state: overdue if it is a missed occurrence, paid if a
+// payment settled it (or it is past and not missed), otherwise still ahead.
+function renewalKind(date, today, missed, settled) {
+  const key = formatDateOnly(date)
+  if (missed.has(key)) return 'overdue'
+  if (settled.has(key) || date < today) return 'paid'
+  return 'renewal'
 }
 
 function heat(intensity) {
@@ -42,15 +57,18 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
     const firstDay = target.getDay()
     const map = {}
     let monthTotal = 0
-    const slot = day => (map[day] ||= { amount: 0, subs: [] })
-    const add = (day, sub) => { if (!slot(day).subs.some(x => x.id === sub.id)) map[day].subs.push(sub) }
+    const today = startOfDay(now)
+    const slot = day => (map[day] ||= { amount: 0, events: [] })
+    const add = (day, sub, kind) => { if (!slot(day).events.some(event => event.sub.id === sub.id)) map[day].events.push({ sub, kind }) }
     // Cycle-aware: only bills that actually land in this month, on their real
     // dates. Day sums and the month total are converted to the base currency.
     subs.filter(isActiveSub).forEach(s => {
       const amt = inBase(getEffectiveAmount(s), s)
+      const missed = new Set(getMissedOccurrences(s, now).map(date => formatDateOnly(date)))
+      const settled = new Set((s.paymentHistory || []).map(p => (p.dueFor ? formatDateOnly(p.dueFor) : null)).filter(Boolean))
       getBillsInRange(s, target, monthEnd).forEach(bill => {
         const d = bill.getDate()
-        add(d, s)
+        add(d, s, renewalKind(bill, today, missed, settled))
         map[d].amount += amt
         monthTotal += amt
       })
@@ -62,7 +80,7 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
       if (!trialEnd || trialEnd < target || trialEnd > monthEnd) return
       const d = trialEnd.getDate()
       const amt = inBase(getEffectiveAmount(s), s)
-      add(d, s)
+      add(d, s, 'trial')
       map[d].amount += amt
       monthTotal += amt
     })
@@ -71,13 +89,22 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
     subs.filter(s => isReminder(s) && !isCanceled(s)).forEach(s => {
       const endDate = parseLocalDate(s.endDate)
       if (!endDate || endDate < target || endDate > monthEnd) return
-      add(endDate.getDate(), s)
+      add(endDate.getDate(), s, 'ends')
     })
     const maxAmount = Math.max(...Object.values(map).map(d => d.amount), 1)
-    const today = now.getMonth() === target.getMonth() && now.getFullYear() === target.getFullYear() ? now.getDate() : -1
+    const todayDate = now.getMonth() === target.getMonth() && now.getFullYear() === target.getFullYear() ? now.getDate() : -1
     const days = []
     for (let i = 0; i < firstDay; i++) days.push(null)
-    for (let d = 1; d <= dim; d++) days.push({ day: d, data: map[d] || null, isToday: d === today })
+    for (let d = 1; d <= dim; d++) {
+      const data = map[d] || null
+      days.push({
+        day: d,
+        data,
+        isToday: d === todayDate,
+        overdue: Boolean(data?.events.some(event => event.kind === 'overdue')),
+        settled: Boolean(data?.events.length && data.events.every(event => event.kind === 'paid')),
+      })
+    }
     return {
       days,
       monthLabel: target.toLocaleString('default', { month: 'long', year: 'numeric' }),
@@ -105,13 +132,13 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
             {day.data.amount > 0 && <span className="num">{formatMoney(day.data.amount, currency)}</span>}
           </p>
           <div className="simple-list">
-            {day.data.subs.map(s => (
+            {day.data.events.map(({ sub: s, kind }) => (
               <div key={s.id} className="flex items-center gap-3 py-2">
                 <button type="button" onClick={() => onViewDetail?.(s)} className="row-title flex-1">
                   <ServiceMark sub={s} size={32} />
                   <span>
                     <strong>{s.name}</strong>
-                    <small>{eventLabel(s)}</small>
+                    <small className={kind === 'overdue' ? '!text-danger' : kind === 'paid' ? '!text-ok' : undefined}>{EVENT_LABELS[kind]}</small>
                   </span>
                 </button>
                 <span className="num flex-none text-[12px] text-soft">{isReminder(s) ? '—' : formatMoney(getEffectiveAmount(s), s.currency || currency)}</span>
@@ -172,15 +199,16 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
                 }
                 const isSelected = selectedDay === day.day
                 const hasMoney = day.data.amount > 0
+                const state = day.overdue ? 'overdue' : day.settled ? 'settled' : ''
                 return (
                   <button
                     key={day.day}
                     type="button"
                     onClick={() => setSelectedDay(isSelected ? null : day.day)}
-                    className={`cal-cell has-bills ${todayClass}`}
+                    className={`cal-cell has-bills ${todayClass} ${state}`}
                     style={{ background: heat(Math.min(day.data.amount / maxAmount, 1)) }}
                     aria-pressed={isSelected}
-                    aria-label={`${monthName} ${day.day}, ${hasMoney ? formatMoney(day.data.amount, currency) : 'a reminder ends'}`}
+                    aria-label={`${monthName} ${day.day}, ${hasMoney ? formatMoney(day.data.amount, currency) : 'a reminder ends'}${day.overdue ? ', overdue' : day.settled ? ', paid' : ''}`}
                   >
                     <span>{day.day}</span>
                     <small>{hasMoney ? formatMoney(day.data.amount, currency) : 'ends'}</small>
@@ -192,6 +220,8 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
               <span>Less</span>
               {[0, 0.33, 0.66, 1].map(step => <i key={step} style={{ background: heat(step) }} />)}
               <span>More</span>
+              <span className="cal-key paid">Paid</span>
+              <span className="cal-key overdue">Overdue</span>
             </p>
           </div>
         </section>

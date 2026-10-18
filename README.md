@@ -48,6 +48,9 @@ charges; the lists below are what is coming up and what needs a decision.
 ### Calendar
 ![Calendar](docs/screenshots/calendar.png)
 
+Past charges show whether they were paid or are still overdue; upcoming ones
+are shaded by how much lands on the day.
+
 ### Mobile subscriptions view
 ![Mobile view](docs/screenshots/mobile.png)
 
@@ -125,7 +128,10 @@ use and does not expose a public network service.
 
 ## Demo data
 
-A small sample backup is included here:
+A sample library is included here — fourteen records covering monthly and
+yearly plans, a free trial, a paused and a canceled subscription, a shared
+family plan, a second currency, a one-time reminder, and five months of
+payment history:
 
 ```text
 docs/demo-data/subtracker-demo-data.json
