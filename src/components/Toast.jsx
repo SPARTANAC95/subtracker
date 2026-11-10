@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { AnimatePresence, motion, useIsPresent } from 'framer-motion'
 import { X } from 'lucide-react'
 import { ToastContext } from './toast-context'
+import Presence, { leaving, useIsPresent } from './Presence'
 import useModal from '../hooks/useModal'
 
 // Dot tone per toast type (see `.status-dot` in index.css).
@@ -11,6 +11,10 @@ const DOT_TONES = {
   warning: 'warn',
   info: 'accent',
 }
+
+// How long a dismissed toast stays mounted to play its way out
+// (`.toast[data-leaving]` in index.css).
+const TOAST_EXIT_MS = 160
 
 let toastId = 0
 
@@ -22,12 +26,14 @@ export function ToastProvider({ children }) {
   const dialogRef = useRef(null)
 
   const removeToast = useCallback((id) => {
-    const timer = timersRef.current.get(id)
-    if (timer) {
-      window.clearTimeout(timer)
-      timersRef.current.delete(id)
-    }
-    setToasts(prev => prev.filter(t => t.id !== id))
+    const timers = timersRef.current
+    window.clearTimeout(timers.get(id))
+    // Mark it leaving so it can fade out, then drop it for real.
+    setToasts(prev => prev.map(t => (t.id === id ? { ...t, leaving: true } : t)))
+    timers.set(id, window.setTimeout(() => {
+      timers.delete(id)
+      setToasts(prev => prev.filter(t => t.id !== id))
+    }, TOAST_EXIT_MS))
   }, [])
 
   const toast = useCallback((type, message, duration = 3000, opts = {}) => {
@@ -81,36 +87,26 @@ export function ToastProvider({ children }) {
 
       {/* Toasts — bottom-right, above the mobile tab bar on small screens */}
       <div className="toast-stack z-[100]" aria-live="polite" aria-atomic="false">
-        <AnimatePresence>
-          {toasts.map(t => (
-            <motion.div
-              key={t.id}
-              layout="position"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-              className="toast"
-            >
-              <span className={`status-dot ${DOT_TONES[t.type] ?? 'accent'}`} aria-hidden="true" />
-              <p>{t.message}</p>
-              {t.action && (
-                <button type="button" onClick={() => { t.action(); removeToast(t.id) }} className="toast-undo">
-                  {t.actionLabel || 'Undo'}
-                </button>
-              )}
-              <button type="button" onClick={() => removeToast(t.id)} className="btn btn-icon" aria-label="Dismiss">
-                <X aria-hidden="true" />
+        {toasts.map(t => (
+          <div key={t.id} className="toast" {...leaving(!t.leaving)}>
+            <span className={`status-dot ${DOT_TONES[t.type] ?? 'accent'}`} aria-hidden="true" />
+            <p>{t.message}</p>
+            {t.action && (
+              <button type="button" onClick={() => { t.action(); removeToast(t.id) }} className="toast-undo">
+                {t.actionLabel || 'Undo'}
               </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+            )}
+            <button type="button" onClick={() => removeToast(t.id)} className="btn btn-icon" aria-label="Dismiss">
+              <X aria-hidden="true" />
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* Confirm dialog */}
-      <AnimatePresence>
-        {confirmState && <ConfirmDialog key="confirm" state={confirmState} dialogRef={dialogRef} onResolve={handleConfirm} />}
-      </AnimatePresence>
+      <Presence show={Boolean(confirmState)} exitMs={150}>
+        {confirmState && <ConfirmDialog state={confirmState} dialogRef={dialogRef} onResolve={handleConfirm} />}
+      </Presence>
     </ToastContext.Provider>
   )
 }
@@ -122,22 +118,13 @@ function ConfirmDialog({ state, dialogRef, onResolve }) {
   const isPresent = useIsPresent()
   useModal(dialogRef, { active: isPresent, onClose: () => onResolve(null) })
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.14 }}
+    <div
       className="modal-backdrop z-[110]"
-      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      aria-hidden={isPresent ? undefined : true}
+      {...leaving(isPresent)}
       onMouseDown={event => { if (event.target === event.currentTarget) onResolve(null) }}
     >
-      <motion.div
+      <div
         ref={dialogRef}
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
-        transition={{ duration: 0.16, ease: 'easeOut' }}
         className="modal confirm"
         role="alertdialog"
         aria-modal="true"
@@ -160,7 +147,7 @@ function ConfirmDialog({ state, dialogRef, onResolve }) {
             {state.okLabel || 'Confirm'}
           </button>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

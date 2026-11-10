@@ -62,7 +62,7 @@ export function checkUpcomingBills(subs, settings) {
   })
 
   subs.forEach(s => {
-    if (s.paused || isCanceled(s)) return
+    if (s.paused || isCanceled(s) || s.scheduleVerified === false) return
 
     // One-time reminders warn before their end date instead of a billing day.
     if (isReminder(s)) {

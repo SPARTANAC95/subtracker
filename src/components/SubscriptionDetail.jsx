@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from 'react'
-import { motion, useIsPresent } from 'framer-motion'
 import {
   Archive, BellRing, Calendar, CalendarClock, Check, CheckCircle2, Clock3, CreditCard, ExternalLink,
   Link as LinkIcon, Pause, Pencil, Play, RotateCcw, Trash2,
@@ -9,21 +8,22 @@ import { getCategoryById } from '../utils/categories'
 import { formatMoney } from '../utils/currencies'
 import { getEffectiveMonthlyCost, getDaysUntilBilling, getNextBillingDate, getReminderDaysLeft, rollForwardBillingDate } from '../utils/stats'
 import { getSubscriptionStatus, isReminder } from '../utils/subscriptions'
-import { CYCLE_LABELS, STATUS_STYLES, cycleLabel, paymentLabel, plural, relativeDay, reminderEndPhrase, reminderState } from '../utils/labels'
+import { CYCLE_LABELS, STATUS_STYLES, UNVERIFIED_REMINDER, cycleLabel, paymentLabel, plural, relativeDay, reminderEndPhrase, reminderState } from '../utils/labels'
 import { daysBetween, formatDisplayDate, parseLocalDate } from '../utils/dates'
 import ServiceMark from './ServiceMark'
 import StatusBadge from './StatusBadge'
+import { leaving, useIsPresent } from './Presence'
 import useModal from '../hooks/useModal'
 
 const PAYMENTS_PREVIEW = 6
 const LONG_DATE = { month: 'short', day: 'numeric', year: 'numeric' }
 
-export default function SubscriptionDetail({ sub, currency, toBase, onClose, onEdit, onDelete, onTogglePause, onMarkPaid, onReactivate }) {
+export default function SubscriptionDetail({ sub, currency, toBase, onClose, onEdit, onDelete, onTogglePause, onMarkPaid, onReactivate, onVerify }) {
   const drawerRef = useRef(null)
   const closeRef = useRef(null)
   const [showAllPayments, setShowAllPayments] = useState(false)
-  // Rendered inside AnimatePresence: once closing, the fading backdrop must
-  // stop intercepting clicks meant for the page underneath.
+  // Rendered inside <Presence>: once closing, the fading backdrop must stop
+  // intercepting clicks meant for the page underneath.
   const isPresent = useIsPresent()
 
   // Computed before any early return — hooks must run in the same order on
@@ -48,18 +48,13 @@ export default function SubscriptionDetail({ sub, currency, toBase, onClose, onE
   const hasMeta = Boolean(sub.startDate || sub.payment || sub.url || (!reminder && (sub.lastPaid || sub.isShared)))
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      transition={{ duration: 0.16 }}
+    <div
       className="drawer-backdrop z-[80]"
-      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      aria-hidden={isPresent ? undefined : true}
+      {...leaving(isPresent)}
       onMouseDown={event => { if (event.target === event.currentTarget) onClose?.() }}
     >
-      <motion.aside
+      <aside
         ref={drawerRef}
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ duration: 0.22, ease: [0.22, 0.8, 0.3, 1] }}
         role="dialog" aria-modal="true" aria-labelledby="subscription-detail-title"
         className="drawer"
       >
@@ -84,6 +79,7 @@ export default function SubscriptionDetail({ sub, currency, toBase, onClose, onE
               toBase={toBase}
               onEdit={onEdit}
               onDelete={onDelete}
+              onVerify={onVerify}
             />
           ) : (
             <RecurringBody
@@ -101,6 +97,7 @@ export default function SubscriptionDetail({ sub, currency, toBase, onClose, onE
               onTogglePause={onTogglePause}
               onMarkPaid={onMarkPaid}
               onReactivate={onReactivate}
+              onVerify={onVerify}
             />
           )}
 
@@ -138,12 +135,14 @@ export default function SubscriptionDetail({ sub, currency, toBase, onClose, onE
             </section>
           )}
         </div>
-      </motion.aside>
-    </motion.div>
+      </aside>
+    </div>
   )
 }
 
-function RecurringBody({ sub, status, subCurrency, currency, isForeign, toBase, payments, showAllPayments, onToggleAllPayments, onEdit, onDelete, onTogglePause, onMarkPaid, onReactivate }) {
+function RecurringBody({ sub, status, subCurrency, currency, isForeign, toBase, payments, showAllPayments, onToggleAllPayments, onEdit, onDelete, onTogglePause, onMarkPaid, onReactivate, onVerify }) {
+  const dateUnverified = sub.scheduleVerified === false && (status === 'active' || status === 'paused')
+  const priceUnverified = sub.amountVerified === false
   const statusStyle = STATUS_STYLES[status]
   const monthly = getEffectiveMonthlyCost(sub)
   const nextDate = status === 'trial' && sub.trialEnd
@@ -157,13 +156,14 @@ function RecurringBody({ sub, status, subCurrency, currency, isForeign, toBase, 
     ? toBase(payment.amount, payment.currency || subCurrency) / toBase(1, subCurrency)
     : parseFloat(payment.amount) || 0), 0)
 
-  const nextTitle = status === 'canceled' ? '—' : formatDisplayDate(nextDate, LONG_DATE)
+  const nextTitle = status === 'canceled' ? '—' : dateUnverified ? 'Unverified' : formatDisplayDate(nextDate, LONG_DATE)
   const nextDescription = status === 'canceled'
     ? sub.canceledAt ? `Canceled ${formatDisplayDate(sub.canceledAt, LONG_DATE)}` : 'Canceled record'
     : status === 'paused'
       ? 'Schedule paused'
       : status === 'trial'
         ? (trialDays != null && trialDays < 0 ? 'Ended — keep it or cancel it' : 'Decide before it converts')
+        : dateUnverified ? 'No confirmed renewal date'
         : days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : relativeDay(days)
   const nextIsLate = (days != null && days < 0) || (trialDays != null && trialDays < 0)
   const resumeDate = status === 'canceled' ? rollForwardBillingDate(sub) : null
@@ -186,6 +186,23 @@ function RecurringBody({ sub, status, subCurrency, currency, isForeign, toBase, 
           )}
         </div>
       </div>
+
+      {(dateUnverified || priceUnverified) && (
+        <div className="verify-note">
+          {dateUnverified && (
+            <p>
+              <span>The renewal date{sub.billingDate ? ` (${formatDisplayDate(sub.billingDate, LONG_DATE)})` : ''} came from an import and is not confirmed, so it is left out of forecasts and alerts.</span>
+              <button type="button" onClick={() => onVerify?.(sub.id, 'schedule')} className="btn btn-sm"><Check aria-hidden="true" /> Date is right</button>
+            </p>
+          )}
+          {priceUnverified && (
+            <p>
+              <span>The price is an unverified estimate. It still counts toward your monthly total.</span>
+              <button type="button" onClick={() => onVerify?.(sub.id, 'amount')} className="btn btn-sm"><Check aria-hidden="true" /> Price is right</button>
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="fact-grid">
         <Fact label={status === 'trial' ? 'Trial ends' : 'Next renewal'} value={nextTitle} description={nextDescription} danger={nextIsLate} />
@@ -257,9 +274,10 @@ function RecurringBody({ sub, status, subCurrency, currency, isForeign, toBase, 
   )
 }
 
-function ReminderBody({ sub, subCurrency, currency, isForeign, toBase, onEdit, onDelete }) {
+function ReminderBody({ sub, subCurrency, currency, isForeign, toBase, onEdit, onDelete, onVerify }) {
   const days = getReminderDaysLeft(sub)
-  const state = reminderState(days)
+  const dateUnverified = sub.scheduleVerified === false
+  const state = dateUnverified ? UNVERIFIED_REMINDER : reminderState(days)
   return (
     <>
       <div>
@@ -278,8 +296,8 @@ function ReminderBody({ sub, subCurrency, currency, isForeign, toBase, onEdit, o
       <div className="fact-grid">
         <Fact
           label="Ends"
-          value={sub.endDate ? formatDisplayDate(sub.endDate, LONG_DATE) : '—'}
-          description={reminderEndPhrase(days)}
+          value={dateUnverified ? 'Unverified' : sub.endDate ? formatDisplayDate(sub.endDate, LONG_DATE) : '—'}
+          description={dateUnverified ? 'left out of alerts' : reminderEndPhrase(days)}
           danger={days != null && days < 0}
         />
         <Fact
@@ -288,8 +306,17 @@ function ReminderBody({ sub, subCurrency, currency, isForeign, toBase, onEdit, o
           description={sub.startDate ? 'purchase date' : 'not recorded'}
         />
         <Fact label="Price paid" value={formatMoney(sub.amount, subCurrency)} description="one-time, not in monthly spend" />
-        <Fact label="Time left" value={days == null ? '—' : days < 0 ? 'Ended' : `${days} ${plural(days, 'day')}`} description={days == null ? 'set an end date' : days < 0 ? 'rebuy or let it go' : 'until it runs out'} />
+        <Fact label="Time left" value={days == null ? '—' : days < 0 ? 'Ended' : `${days} ${plural(days, 'day')}`} description={dateUnverified ? 'end date unverified' : days == null ? 'set an end date' : days < 0 ? 'rebuy or let it go' : 'until it runs out'} />
       </div>
+
+      {dateUnverified && (
+        <div className="verify-note">
+          <p>
+            <span>The end date{sub.endDate ? ` (${formatDisplayDate(sub.endDate, LONG_DATE)})` : ''} came from an import and is not confirmed, so there are no alerts or calendar entry for it.</span>
+            <button type="button" onClick={() => onVerify?.(sub.id, 'schedule')} className="btn btn-sm"><Check aria-hidden="true" /> Date is right</button>
+          </p>
+        </div>
+      )}
 
       <div className="action-row">
         <button type="button" onClick={() => onEdit?.(sub)} className="btn btn-primary">
@@ -305,7 +332,7 @@ function ReminderBody({ sub, subCurrency, currency, isForeign, toBase, onEdit, o
           <BellRing aria-hidden="true" />
           <span>One-time purchases never renew on their own. You get a notification and a calendar entry before the end date; when it ends, rebuy it or delete the reminder.</span>
         </p>
-        {sub.endDate && (
+        {sub.endDate && !dateUnverified && (
           <p className="hint mt-2">
             <CalendarClock aria-hidden="true" />
             <span>Marked on the calendar for {formatDisplayDate(sub.endDate, LONG_DATE)}.</span>
@@ -349,6 +376,11 @@ function MetaRow({ icon: Icon, label, value }) {
 }
 
 function scheduleAnchorText(sub) {
+  if (sub.scheduleVerified === false) {
+    return sub.billingDate
+      ? `The stored date, ${formatDisplayDate(sub.billingDate, LONG_DATE)}, is unverified and left out of forecasts and alerts.`
+      : 'No verified renewal date is recorded.'
+  }
   if (!sub.billingDate) return 'No billing anchor is set. Add one in Edit to keep future renewals predictable.'
   const anchor = parseLocalDate(sub.billingDate)
   if (!anchor) return 'The billing anchor needs review. Open Edit and choose a valid renewal date.'

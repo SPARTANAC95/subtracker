@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
 import { Search, Plus, LayoutDashboard, List, BellRing, BarChart3, CalendarDays, Settings, CornerDownLeft } from 'lucide-react'
 import { getCategoryById } from '../utils/categories'
 import { formatMoney } from '../utils/currencies'
 import { getEffectiveMonthlyCost, getReminderDaysLeft, isReminder } from '../utils/stats'
 import ServiceMark from './ServiceMark'
+import Presence, { leaving, useIsPresent } from './Presence'
 import useModal from '../hooks/useModal'
 
 const COMMANDS = [
@@ -24,7 +24,7 @@ function subSublabel(sub, baseCurrency) {
   const cat = getCategoryById(sub.category)
   if (isReminder(sub)) {
     const days = getReminderDaysLeft(sub)
-    const phrase = days == null ? 'no end date' : days < 0 ? 'expired' : days === 0 ? 'ends today' : `ends in ${days}d`
+    const phrase = sub.scheduleVerified === false ? 'end date unverified' : days == null ? 'no end date' : days < 0 ? 'expired' : days === 0 ? 'ends today' : `ends in ${days}d`
     return `Reminder · ${cat.label} · ${phrase}`
   }
   return `${cat.label} · ${formatMoney(getEffectiveMonthlyCost(sub), sub.currency || baseCurrency)}/mo`
@@ -32,9 +32,9 @@ function subSublabel(sub, baseCurrency) {
 
 export default function CommandPalette({ open, ...props }) {
   return (
-    <AnimatePresence>
-      {open && <PaletteDialog key="palette" {...props} />}
-    </AnimatePresence>
+    <Presence show={open} exitMs={140}>
+      <PaletteDialog {...props} />
+    </Presence>
   )
 }
 
@@ -116,21 +116,12 @@ function PaletteDialog({ onClose, subs, currency, onSwitchTab, onViewDetail, onA
   }, [activeId])
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.13 }}
+    <div
       className="palette-backdrop z-[90]"
-      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      aria-hidden={isPresent ? undefined : true}
+      {...leaving(isPresent)}
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
-        transition={{ duration: 0.15, ease: 'easeOut' }}
+      <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -197,7 +188,7 @@ function PaletteDialog({ onClose, subs, currency, onSwitchTab, onViewDetail, onA
           <span><kbd>Enter</kbd> to open</span>
           <span><kbd>Esc</kbd> to close</span>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

@@ -108,6 +108,15 @@ function getFormatter(currency) {
   return formatter
 }
 
+// Whole units only, for places too narrow for cents (chart labels). The
+// exact figure is always available next to it — a tooltip or a row.
+export function formatMoneyRounded(amount, currencyCode = 'USD') {
+  const currency = getCurrency(currencyCode)
+  const num = Math.round(parseFloat(amount))
+  const safe = Number.isFinite(num) ? num : 0
+  return `${safe < 0 ? '-' : ''}${currency.symbol}${Math.abs(safe).toLocaleString()}`
+}
+
 export function formatMoney(amount, currencyCode = 'USD') {
   const currency = getCurrency(currencyCode)
   const decimals = currency.decimals ?? 2

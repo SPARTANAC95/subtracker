@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import useModal from '../hooks/useModal'
-import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
+import Presence, { leaving, useIsPresent } from './Presence'
 import { X } from 'lucide-react'
 import { MOD_KEY } from '../utils/labels'
 
@@ -26,9 +26,9 @@ const SHORTCUTS = [
 
 export default function ShortcutsHelp({ open, onClose }) {
   return (
-    <AnimatePresence>
-      {open && <ShortcutsDialog key="shortcuts" onClose={onClose} />}
-    </AnimatePresence>
+    <Presence show={open} exitMs={150}>
+      <ShortcutsDialog onClose={onClose} />
+    </Presence>
   )
 }
 
@@ -38,17 +38,12 @@ function ShortcutsDialog({ onClose }) {
   const isPresent = useIsPresent()
   useModal(panelRef, { active: isPresent, onClose, initialFocusRef: closeRef })
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      transition={{ duration: 0.14 }}
+    <div
       className="modal-backdrop z-[85]"
-      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      aria-hidden={isPresent ? undefined : true}
+      {...leaving(isPresent)}
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }}
-        transition={{ duration: 0.16, ease: 'easeOut' }}
+      <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -76,7 +71,7 @@ function ShortcutsDialog({ onClose }) {
             </section>
           ))}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

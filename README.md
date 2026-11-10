@@ -24,7 +24,12 @@ with personal finance data. SubTracker keeps things simple:
 - **Payment history** with due-date tracking so early and late payments do not
   silently break the schedule
 - **Budgeting and insights** for monthly commitment, recorded paid totals,
-  upcoming spend, and category breakdowns
+  upcoming spend, the plans that cost the most, and category breakdowns —
+  past months come from what you actually paid, future months from the
+  schedule
+- **Imported data stays honest**: a date or price that came from an import
+  and was never confirmed is shown as unverified, kept out of forecasts and
+  alerts, and confirmed with one click
 - **Calendar view** for billing dates and reminder end dates
 - **Local-first persistence** with browser storage plus a real JSON data file
   on disk
@@ -60,7 +65,7 @@ are shaded by how much lands on the day.
 - Vite 7
 - Tailwind CSS 4 (design tokens and utilities; components are plain CSS in
   `src/index.css`)
-- Framer Motion
+- Motion is plain CSS (no animation library) — see `src/components/Presence.jsx`
 - Inter, bundled with the app (`@fontsource-variable/inter`) — no font service
   is contacted and the type works offline
 - Local Node.js server for disk-backed persistence
@@ -79,7 +84,8 @@ npm install
 npm run app
 ```
 
-That builds the app and starts the local server at `http://localhost:5273`.
+That starts the local server at `http://localhost:5273`, rebuilding the app
+first only if its files changed since the last start.
 
 ### Development mode
 
@@ -102,7 +108,7 @@ If you want a double-click flow on Windows, use `launch.bat`.
 It will:
 
 1. check that Node.js is installed
-2. build the app if needed
+2. rebuild the app only if its files changed (otherwise it opens at once)
 3. start the local server
 4. open the app in your browser
 
@@ -147,7 +153,8 @@ npm run dev      # Vite dev server
 npm run build    # production build
 npm run serve    # local Node server, no browser auto-open
 npm run start    # local Node server with browser auto-open
-npm run app      # build + start real app
+npm run app      # start the real app (rebuilds only when needed)
+npm run sandbox  # the app on port 5299 against a throwaway copy of your data
 npm run lint     # ESLint
 npm test         # Node test suite
 npm run check    # lint + tests + build
@@ -159,6 +166,7 @@ npm run check    # lint + tests + build
 src/              React app source
 public/           static assets (icon, manifest, service worker)
 tests/            Node tests and browser-flow scripts
+scripts/          launch helpers (build-if-changed, sandbox server)
 server.mjs        local data server and backup logic
 launch.bat        Windows launcher
 ```

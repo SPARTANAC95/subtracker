@@ -28,10 +28,14 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
+    // The app only ever runs in the user's own, current browser.
+    target: 'es2022',
     rollupOptions: {
       output: {
-        manualChunks: {
-          motion: ['framer-motion'],
+        // React changes far less often than the app: in its own chunk it
+        // stays cached across rebuilds.
+        manualChunks(id) {
+          if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react'
         },
       },
     },

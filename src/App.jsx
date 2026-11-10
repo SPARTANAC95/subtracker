@@ -1,5 +1,4 @@
 import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { motion, AnimatePresence, useIsPresent } from 'framer-motion'
 import {
   LayoutDashboard, List, BellRing, BarChart3, CalendarDays, Settings,
   Volume2, VolumeX, Search, Plus, X
@@ -35,6 +34,7 @@ import {
 import { ToastProvider } from './components/Toast'
 import { useToast } from './components/toast-context'
 import BrandMark from './components/BrandMark'
+import Presence, { leaving, useIsPresent } from './components/Presence'
 import SetupWizard from './components/SetupWizard'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -42,10 +42,53 @@ import SubscriptionDetail from './components/SubscriptionDetail'
 import Dashboard from './components/Dashboard'
 import SubscriptionForm from './components/SubscriptionForm'
 import SubscriptionList from './components/SubscriptionList'
-const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel'))
-const CalendarView = lazy(() => import('./components/CalendarView'))
-const RemindersPanel = lazy(() => import('./components/RemindersPanel'))
-const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
+// A tab left open across a rebuild still asks for the previous build's files,
+// which are gone. Reload once to pick up the new build instead of showing an
+// error (at most once every few seconds, so a real failure cannot loop).
+const CHUNK_RELOAD_KEY = 'st-chunk-reload'
+function reloadIfStale(importer) {
+  return () => importer().catch(error => {
+    try {
+      const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY)) || 0
+      if (Date.now() - last > 10000) {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
+        window.location.reload()
+        return new Promise(() => {})
+      }
+    } catch { /* storage unavailable — fall through to the error screen */ }
+    throw error
+  })
+}
+
+// A page that is not on screen first lives in its own chunk. Once that chunk
+// has arrived (it is fetched while the browser is idle) the page renders
+// directly; React.lazy alone would still flash the loading fallback for a
+// frame on every first visit.
+function panel(importer) {
+  let Loaded = null
+  const load = () => importer().then(module => { Loaded = module.default; return module })
+  const Lazy = lazy(reloadIfStale(load))
+  function Panel(props) {
+    // Decided once per mount: swapping component types mid-life would
+    // remount the page and drop its state.
+    const [Component] = useState(() => Loaded || Lazy)
+    return <Component {...props} />
+  }
+  Panel.preload = () => load().catch(() => {})
+  return Panel
+}
+
+const AnalyticsPanel = panel(() => import('./components/AnalyticsPanel'))
+const CalendarView = panel(() => import('./components/CalendarView'))
+const RemindersPanel = panel(() => import('./components/RemindersPanel'))
+const SettingsPanel = panel(() => import('./components/SettingsPanel'))
+
+// Fetch the other pages' code while the browser is idle, so switching to them
+// never waits on a download and they are cached for the times the local
+// server is not running.
+function preloadPanels() {
+  for (const Panel of [AnalyticsPanel, CalendarView, RemindersPanel, SettingsPanel]) Panel.preload()
+}
 
 // Order matters: the 1–6 shortcuts index into this list.
 const TABS = [
@@ -173,18 +216,34 @@ function AppInner() {
     const from = parseLocalDate(today) || new Date()
     return (Array.isArray(subs) ? subs : [])
       .filter(isActiveSub)
-      .map(sub => {
-        const date = getNextBillingDate(sub)
-        return { sub, date, days: daysBetween(from, date) }
-      })
+      // Records without a confirmed schedule have no "next" to show.
+      .map(sub => ({ sub, date: getNextBillingDate(sub) }))
+      .filter(item => item.date)
+      .map(item => ({ ...item, days: daysBetween(from, item.date) }))
       .sort((a, b) => a.date - b.date)
       .slice(0, UP_NEXT_COUNT)
   }, [subs, today])
+
+  // Recurring records and one-time reminders share the store but live in
+  // separate tabs — split once per data change so counts and lists stay
+  // consistent and the pages only rebuild their models when the data moves.
+  const recurringSubs = useMemo(() => (Array.isArray(subs) ? subs.filter(s => !isReminder(s)) : []), [subs])
+  const reminderSubs = useMemo(() => (Array.isArray(subs) ? subs.filter(isReminder) : []), [subs])
 
   // Shortcuts only make sense once the main interface is on screen. Before
   // that (loading, first-run setup) a stray "n" or "2" used to queue up a
   // form or a tab switch that then appeared the moment setup finished.
   const appReady = hydrated && sync.ready && Boolean(settings)
+
+  useEffect(() => {
+    if (!appReady) return undefined
+    if (window.requestIdleCallback) {
+      const id = window.requestIdleCallback(preloadPanels, { timeout: 4000 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const timer = window.setTimeout(preloadPanels, 1500)
+    return () => window.clearTimeout(timer)
+  }, [appReady])
 
   useEffect(() => {
     if (!appReady) return undefined
@@ -245,10 +304,6 @@ function AppInner() {
   }
 
   const currency = settings.currency || 'USD'
-  // Recurring records and one-time reminders share the store but live in
-  // separate tabs — split once here so counts and lists stay consistent.
-  const recurringSubs = subs.filter(s => !isReminder(s))
-  const reminderSubs = subs.filter(isReminder)
 
   // No explicit kind → follow the page: the Reminders tab adds a reminder,
   // everywhere else adds a recurring subscription.
@@ -263,7 +318,18 @@ function AppInner() {
   function handleAddSub(data) {
     if (editSub) {
       const previous = pinSubscriptionCurrency(editSub, currency)
-      const updated = normalizeSubscription({ ...previous, ...data, paymentHistory: previous.paymentHistory }, { genId: createSubscriptionId })
+      // Changing the date or the price in the form is how an imported,
+      // unverified value gets confirmed.
+      const dateField = isReminder(previous) ? 'endDate' : 'billingDate'
+      const dateChanged = (data[dateField] || null) !== (previous[dateField] || null)
+      const amountChanged = Number(data.amount) !== previous.amount || (data.currency || currency) !== previous.currency
+      const updated = normalizeSubscription({
+        ...previous,
+        ...data,
+        scheduleVerified: dateChanged ? true : previous.scheduleVerified,
+        amountVerified: amountChanged ? true : previous.amountVerified,
+        paymentHistory: previous.paymentHistory,
+      }, { genId: createSubscriptionId })
       if (!updated) { toast.error('Subscription is invalid'); return }
       setSubs(prev => prev.map(s => s.id === editSub.id ? updated : s))
       setEditSub(null)
@@ -378,9 +444,9 @@ function AppInner() {
     // Paying an overdue renewal: some services restart the billing period
     // from the day you renew, others keep the original anchor. Let the user
     // pick; dismissing the dialog (Escape/backdrop) records nothing.
-    const daysLate = getSubscriptionStatus(sub) === 'active' ? getDaysUntilBilling(sub) : 0
+    const daysLate = getSubscriptionStatus(sub) === 'active' ? getDaysUntilBilling(sub) : null
     let restartFromToday = false
-    if (daysLate < 0) {
+    if (daysLate != null && daysLate < 0) {
       // Several cycles may have gone by unrecorded. Say so, and say what each
       // choice does about it, so the user is not surprised when "keep the
       // schedule" leaves the next occurrence overdue as well.
@@ -395,10 +461,12 @@ function AppInner() {
     }
 
     const today = formatDateOnly(new Date())
-    const dueFor = restartFromToday ? today : formatDateOnly(getNextBillingDate(sub))
+    // No verified schedule → nothing to settle; the payment is still logged.
+    const nextDue = restartFromToday ? null : getNextBillingDate(sub)
+    const dueFor = restartFromToday ? today : nextDue ? formatDateOnly(nextDue) : null
     // recordSubscriptionPayment would silently no-op on a duplicate due date;
     // surface that instead of rebasing the anchor and claiming success.
-    if ((sub.paymentHistory || []).some(p => p.dueFor && formatDateOnly(p.dueFor) === dueFor)) {
+    if (dueFor && (sub.paymentHistory || []).some(p => p.dueFor && formatDateOnly(p.dueFor) === dueFor)) {
       toast.info('Already recorded for this due date')
       return
     }
@@ -406,13 +474,15 @@ function AppInner() {
     // settles "today", so the next renewal lands one full cycle from now.
     const updated = restartFromToday
       ? { ...recordSubscriptionPayment(pinSubscriptionCurrency(sub, currency), { dueFor: today }), billingDate: today }
-      : recordSubscriptionPayment(pinSubscriptionCurrency(sub, currency))
+      : recordSubscriptionPayment(pinSubscriptionCurrency(sub, currency), dueFor ? { dueFor } : {})
     setSubs(prev => prev.map(s => (s.id === id ? updated : s)))
     playSuccess()
     const stillMissed = restartFromToday ? 0 : getMissedOccurrences(updated).length
     const summary = restartFromToday
       ? `Marked ${sub.name} paid — schedule restarted from today`
-      : `Marked ${sub.name} paid for ${formatDisplayDate(dueFor, SHORT_DATE)}${stillMissed ? ` · ${stillMissed} more overdue` : ''}`
+      : dueFor
+        ? `Marked ${sub.name} paid for ${formatDisplayDate(dueFor, SHORT_DATE)}${stillMissed ? ` · ${stillMissed} more overdue` : ''}`
+        : `Recorded a payment for ${sub.name} — its renewal date is still unverified`
     toast.success(summary, stillMissed ? 6000 : 4000, {
       actionLabel: 'Undo',
       action: () => {
@@ -508,6 +578,13 @@ function AppInner() {
   }
 
   function handleEditSub(sub) { setEditSub(sub); setShowForm(true); setDetailSub(null) }
+
+  // One click to say "the imported date/price is right" without retyping it.
+  function handleVerify(id, field) {
+    const key = field === 'amount' ? 'amountVerified' : 'scheduleVerified'
+    setSubs(prev => prev.map(s => (s.id === id ? { ...s, [key]: true } : s)))
+    toast.success(field === 'amount' ? 'Price confirmed' : 'Date confirmed')
+  }
 
   function handleUpdateSettings(next) {
     if (next.currency !== currency) setSubs(prev => prev.map(s => pinSubscriptionCurrency(s, currency)))
@@ -718,7 +795,7 @@ function AppInner() {
             {tab === 'reminders' && (
               <RemindersPanel reminders={reminderSubs} currency={currency} toBase={toBase} onAdd={() => openAddForm('reminder')} onEdit={handleEditSub} onDelete={handleDeleteSub} onViewDetail={setDetailSub} />
             )}
-            {tab === 'charts' && <AnalyticsPanel subs={subs} settings={settings} />}
+            {tab === 'charts' && <AnalyticsPanel subs={subs} settings={settings} onViewDetail={setDetailSub} />}
             {tab === 'calendar' && <CalendarView subs={subs} currency={currency} toBase={toBase} onViewDetail={setDetailSub} />}
             {tab === 'settings' && (
               <SettingsPanel settings={settings} onUpdateSettings={handleUpdateSettings} subs={subs} dismissed={dismissed} onImport={handleImport} onClearAll={handleClearAll} backup={backup} onRestore={handleRestore} sync={sync} soundOn={soundOn} onToggleSound={toggleSound} />
@@ -758,26 +835,23 @@ function AppInner() {
       </nav>
 
       {/* ── Add / edit form ── */}
-      <AnimatePresence>
-        {showForm && (
-          <FormModal
-            key="form"
-            title={editSub
-              ? (isReminder(editSub) ? 'Edit reminder' : 'Edit subscription')
-              : (formKind === 'reminder' ? 'New reminder' : 'New subscription')}
-            onClose={closeForm}
-          >
-            <SubscriptionForm onAdd={handleAddSub} currency={currency} editData={editSub} initialKind={formKind} onCancelEdit={closeForm} />
-          </FormModal>
-        )}
-      </AnimatePresence>
+      <Presence show={showForm}>
+        <FormModal
+          title={editSub
+            ? (isReminder(editSub) ? 'Edit reminder' : 'Edit subscription')
+            : (formKind === 'reminder' ? 'New reminder' : 'New subscription')}
+          onClose={closeForm}
+        >
+          <SubscriptionForm onAdd={handleAddSub} currency={currency} editData={editSub} initialKind={formKind} onCancelEdit={closeForm} />
+        </FormModal>
+      </Presence>
 
       {/* ── Other overlays ── */}
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} subs={subs} currency={currency} onSwitchTab={switchTab} onViewDetail={setDetailSub} onAdd={openAddForm} />
       <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <AnimatePresence>
-        {detailSub && <SubscriptionDetail sub={subs.find(s => s.id === detailSub.id) || detailSub} currency={currency} toBase={toBase} onClose={() => setDetailSub(null)} onEdit={handleEditSub} onDelete={handleDeleteSub} onTogglePause={handleTogglePause} onMarkPaid={handleMarkPaid} onReactivate={handleReactivate} />}
-      </AnimatePresence>
+      <Presence show={Boolean(detailSub)} exitMs={200}>
+        {detailSub && <SubscriptionDetail sub={subs.find(s => s.id === detailSub.id) || detailSub} currency={currency} toBase={toBase} onClose={() => setDetailSub(null)} onEdit={handleEditSub} onDelete={handleDeleteSub} onTogglePause={handleTogglePause} onMarkPaid={handleMarkPaid} onReactivate={handleReactivate} onVerify={handleVerify} />}
+      </Presence>
     </div>
   )
 }
@@ -792,28 +866,19 @@ export default function App() {
 
 function FormModal({ title, onClose, children }) {
   const panelRef = useRef(null)
-  // Direct child of AnimatePresence: while the dialog fades out, its
-  // full-screen backdrop must not swallow the click that follows, and it is
-  // hidden from assistive tech so a closing dialog is never announced
-  // alongside the one replacing it (detail panel → edit form).
+  // Inside <Presence>: while the dialog fades out, its full-screen backdrop
+  // must not swallow the click that follows, and it is hidden from assistive
+  // tech so a closing dialog is never announced alongside the one replacing
+  // it (detail panel → edit form). `leaving()` sets both.
   const isPresent = useIsPresent()
   useModal(panelRef, { active: isPresent, onClose })
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
+    <div
       className="modal-backdrop sheet z-[70]"
-      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
-      aria-hidden={isPresent ? undefined : true}
+      {...leaving(isPresent)}
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 8 }}
-        transition={{ duration: 0.17, ease: 'easeOut' }}
+      <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -827,8 +892,8 @@ function FormModal({ title, onClose, children }) {
           </button>
         </div>
         {children}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }
 

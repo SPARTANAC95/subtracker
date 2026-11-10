@@ -77,6 +77,7 @@ export default function Dashboard({
           <p className="hero-intro">
             <span className="status-dot accent" aria-hidden="true" />
             {model.active.length} active {plural(model.active.length, 'subscription')}, normalized per month
+            {model.estimatedMonthly > 0 && <> · includes <span className="num">{formatMoney(model.estimatedMonthly, currency)}</span> in unverified prices</>}
           </p>
           <h1 id="overview-heading">
             <span className="sr-only">Overview: </span>
@@ -128,7 +129,10 @@ export default function Dashboard({
           <div className="section-heading">
             <div>
               <h2 id="upcoming-heading">Upcoming renewals</h2>
-              <p>The next 45 days, soonest first.</p>
+              <p>
+                The next 45 days, soonest first.
+                {model.unverifiedCount > 0 && ` ${model.unverifiedCount} unverified ${plural(model.unverifiedCount, 'date')} left out.`}
+              </p>
             </div>
             <button type="button" onClick={onOpenSubscriptions} className="text-link">
               All {model.recurringCount} <ArrowRight aria-hidden="true" />
@@ -222,11 +226,17 @@ function buildDashboardModel(subs, settings, day) {
   const toBase = makeSubConverter(settings)
   const active = subs.filter(isActiveSub)
   const monthly = active.reduce((sum, sub) => sum + toBase(getEffectiveMonthlyCost(sub), sub), 0)
+  // Prices carried over from an import and never confirmed: counted, but
+  // called out so the headline is not mistaken for a verified figure.
+  const estimatedMonthly = active
+    .filter(sub => sub.amountVerified === false)
+    .reduce((sum, sub) => sum + toBase(getEffectiveMonthlyCost(sub), sub), 0)
   const remindersEnding = getEndingReminders(subs, 14)
 
-  const renewals = active.map(sub => {
+  // A record without a confirmed renewal date has no place on a schedule.
+  const renewals = active.flatMap(sub => {
     const date = getNextBillingDate(sub)
-    return { sub, days: daysBetween(today, date), date, type: 'renewal', amount: getEffectiveAmount(sub) }
+    return date ? [{ sub, days: daysBetween(today, date), date, type: 'renewal', amount: getEffectiveAmount(sub) }] : []
   })
   const overdue = renewals.filter(item => item.days < 0).sort((a, b) => a.days - b.days)
 
@@ -307,6 +317,8 @@ function buildDashboardModel(subs, settings, day) {
     today,
     active,
     monthly,
+    estimatedMonthly,
+    unverifiedCount: active.length - renewals.length,
     overdue,
     trials,
     remindersEnding,
