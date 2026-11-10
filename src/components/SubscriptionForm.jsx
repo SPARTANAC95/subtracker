@@ -1,5 +1,4 @@
 import { useState, useEffect, useId, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, X, ChevronDown, ChevronUp, Tag, Link, FileText,
   Users, Sparkles, Search, RefreshCw, BellRing, Check,
@@ -10,6 +9,7 @@ import { SERVICE_PRESETS, suggestCategory, getMarkColors, getServiceInitials } f
 import { formatDateOnly } from '../utils/dates'
 import { CYCLE_LABELS, PAYMENT_METHODS } from '../utils/labels'
 import { normalizeServiceUrl } from '../utils/input'
+import { Collapse } from './Presence'
 
 const CYCLES = Object.entries(CYCLE_LABELS).map(([id, label]) => ({ id, label }))
 
@@ -122,6 +122,14 @@ export default function SubscriptionForm({ onAdd, currency, editData, initialKin
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
 
+  function toggleAdvanced() {
+    const next = !showAdvanced
+    setShowAdvanced(next)
+    // The toggle sits at the bottom of the scroll area, so the new fields
+    // would otherwise open out of sight below it. Wait for them to unfold.
+    if (next) window.setTimeout(() => advancedRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 220)
+  }
+
   function handleNameChange(name) {
     // Until the user picks a category themselves it follows the name — in
     // both directions. A guess made from the first few letters ("Net…" →
@@ -198,33 +206,29 @@ export default function SubscriptionForm({ onAdd, currency, editData, initialKin
             <button type="button" onClick={() => setShowPresets(!showPresets)} className="text-link" aria-expanded={showPresets}>
               <Sparkles aria-hidden="true" /> {showPresets ? 'Hide presets' : 'Quick add from presets'}
             </button>
-            <AnimatePresence initial={false}>
-              {presetsVisible && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
-                  <div className="preset-box mt-3">
-                    <label className="tool-search">
-                      <Search aria-hidden="true" />
-                      <input type="text" value={presetSearch} onChange={e => setPresetSearch(e.target.value)} onKeyDown={onPresetSearchKey} placeholder="Search services…" aria-label="Search service presets" />
-                    </label>
-                    {filteredPresets.length ? (
-                      <div className="preset-grid">
-                        {filteredPresets.map(p => (
-                          <button key={p.name} type="button" onClick={() => selectPreset(p)}>
-                            <span className="mark h-[34px] w-[34px] text-[11px]" style={getMarkColors(p)}>{getServiceInitials(p.name)}</span>
-                            <span>{p.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="fine-print mt-3">No preset matches — just type the name below.</p>
-                    )}
-                    <p className="fine-print mt-2.5">
-                      Presets fill the name and category. {subCurrency === 'USD' ? 'The price is an example — verify it before saving.' : `Enter the current price in ${subCurrency}.`}
-                    </p>
+            <Collapse open={presetsVisible}>
+              <div className="preset-box mt-3">
+                <label className="tool-search">
+                  <Search aria-hidden="true" />
+                  <input type="text" value={presetSearch} onChange={e => setPresetSearch(e.target.value)} onKeyDown={onPresetSearchKey} placeholder="Search services…" aria-label="Search service presets" />
+                </label>
+                {filteredPresets.length ? (
+                  <div className="preset-grid">
+                    {filteredPresets.map(p => (
+                      <button key={p.name} type="button" onClick={() => selectPreset(p)}>
+                        <span className="mark h-[34px] w-[34px] text-[11px]" style={getMarkColors(p)}>{getServiceInitials(p.name)}</span>
+                        <span>{p.name}</span>
+                      </button>
+                    ))}
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                ) : (
+                  <p className="fine-print mt-3">No preset matches — just type the name below.</p>
+                )}
+                <p className="fine-print mt-2.5">
+                  Presets fill the name and category. {subCurrency === 'USD' ? 'The price is an example — verify it before saving.' : `Enter the current price in ${subCurrency}.`}
+                </p>
+              </div>
+            </Collapse>
           </div>
         )}
 
@@ -275,100 +279,88 @@ export default function SubscriptionForm({ onAdd, currency, editData, initialKin
           <select id={`${id}-category`} value={form.category} onChange={e => { categoryEditedRef.current = true; set('category', e.target.value) }} className="input">{CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
         </div>
 
-        <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="text-link self-start" aria-expanded={showAdvanced}>
+        <button type="button" onClick={toggleAdvanced} className="text-link self-start" aria-expanded={showAdvanced}>
           {showAdvanced ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
           {showAdvanced ? 'Fewer options' : isReminderKind ? 'More options — payment, tags, notes' : 'More options — start date, trial, payment, notes'}
         </button>
 
-        <AnimatePresence initial={false}>
-          {showAdvanced && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}
-              // The toggle sits at the bottom of the scroll area, so the new
-              // fields would otherwise open out of sight below it.
-              onAnimationComplete={definition => { if (definition?.height === 'auto') advancedRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }}
-              ref={advancedRef}
-              className="-m-[3px] overflow-hidden p-[3px]"
-            >
-              {/* The 3px inset keeps focus rings inside the clipped, animated box. */}
-              <div className="form-stack">
-                <div className="form-grid">
-                  {!isReminderKind && (
-                    <div>
-                      <Label htmlFor={`${id}-start`}>Start date</Label>
-                      <input id={`${id}-start`} type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} className="input num" />
-                    </div>
-                  )}
-                  <div className={isReminderKind ? 'col-span-2' : undefined}>
-                    <Label htmlFor={`${id}-payment`}>Payment</Label>
-                    <select id={`${id}-payment`} value={form.payment} onChange={e => set('payment', e.target.value)} className="input">{PAYMENT_METHODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
-                  </div>
-                </div>
-
-                {!isReminderKind && (
-                  <>
-                    <div>
-                      <Label htmlFor={`${id}-renewal`}>Renewal</Label>
-                      <select id={`${id}-renewal`} value={form.renewal} onChange={e => set('renewal', e.target.value)} className="input"><option value="auto">Auto-renew</option><option value="manual">Manual</option></select>
-                    </div>
-
-                    <div className="check-row">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={form.isTrial}
-                          onChange={e => {
-                            const on = e.target.checked
-                            // A trial without an end date can never warn — default to
-                            // the billing date, which is when it would convert.
-                            setForm(f => ({ ...f, isTrial: on, trialEnd: on && !f.trialEnd ? (f.billingDate || formatDateOnly(new Date())) : f.trialEnd }))
-                          }}
-                        />
-                        Free trial, ends
-                      </label>
-                      {form.isTrial && <input type="date" value={form.trialEnd} onChange={e => set('trialEnd', e.target.value)} className="input input-sm num flex-1" aria-label="Trial end date" />}
-                    </div>
-
-                    <div className="check-row">
-                      <label>
-                        <input type="checkbox" checked={form.isShared} onChange={e => set('isShared', e.target.checked)} />
-                        <Users aria-hidden="true" /> Shared
-                      </label>
-                      {form.isShared && (
-                        <span className="flex flex-1 items-center gap-2 text-[11.5px] text-muted">
-                          <input type="number" min="1" value={form.sharedN} onChange={e => set('sharedN', e.target.value)} aria-label="People sharing this subscription" className="input input-sm num !w-16" />
-                          people, my share
-                          <input type="number" min="1" max="100" value={form.sharedPct} onChange={e => set('sharedPct', e.target.value)} aria-label="Your share percentage" className="input input-sm num !w-16" />
-                          %
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-
+        <Collapse open={showAdvanced} innerRef={advancedRef}>
+          <div className="form-stack">
+            <div className="form-grid">
+              {!isReminderKind && (
                 <div>
-                  <Label htmlFor={`${id}-tags`}><Tag aria-hidden="true" /> Tags</Label>
-                  <div className="tag-box">
-                    {form.tags.map(tag => (
-                      <span key={tag} className="chip">
-                        {tag}<button type="button" onClick={() => set('tags', form.tags.filter(t => t !== tag))} aria-label={`Remove tag ${tag}`}><X className="h-2.5 w-2.5" aria-hidden="true" /></button>
-                      </span>
-                    ))}
-                    <input id={`${id}-tags`} type="text" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={addTag} placeholder={form.tags.length ? '' : 'Type and press Enter'} />
-                  </div>
+                  <Label htmlFor={`${id}-start`}>Start date</Label>
+                  <input id={`${id}-start`} type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} className="input num" />
                 </div>
-                <div>
-                  <Label htmlFor={`${id}-url`}><Link aria-hidden="true" /> URL</Label>
-                  <input id={`${id}-url`} type="text" inputMode="url" autoComplete="off" spellCheck={false} aria-invalid={Boolean(formError && form.url.trim() && !normalizeServiceUrl(form.url))} value={form.url} onChange={e => set('url', e.target.value)} placeholder="netflix.com" className="input" />
-                </div>
-                <div>
-                  <Label htmlFor={`${id}-notes`}><FileText aria-hidden="true" /> Notes</Label>
-                  <textarea id={`${id}-notes`} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Plan details, cancellation date…" rows={3} className="input" />
-                </div>
+              )}
+              <div className={isReminderKind ? 'col-span-2' : undefined}>
+                <Label htmlFor={`${id}-payment`}>Payment</Label>
+                <select id={`${id}-payment`} value={form.payment} onChange={e => set('payment', e.target.value)} className="input">{PAYMENT_METHODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+
+            {!isReminderKind && (
+              <>
+                <div>
+                  <Label htmlFor={`${id}-renewal`}>Renewal</Label>
+                  <select id={`${id}-renewal`} value={form.renewal} onChange={e => set('renewal', e.target.value)} className="input"><option value="auto">Auto-renew</option><option value="manual">Manual</option></select>
+                </div>
+
+                <div className="check-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.isTrial}
+                      onChange={e => {
+                        const on = e.target.checked
+                        // A trial without an end date can never warn — default to
+                        // the billing date, which is when it would convert.
+                        setForm(f => ({ ...f, isTrial: on, trialEnd: on && !f.trialEnd ? (f.billingDate || formatDateOnly(new Date())) : f.trialEnd }))
+                      }}
+                    />
+                    Free trial, ends
+                  </label>
+                  {form.isTrial && <input type="date" value={form.trialEnd} onChange={e => set('trialEnd', e.target.value)} className="input input-sm num flex-1" aria-label="Trial end date" />}
+                </div>
+
+                <div className="check-row">
+                  <label>
+                    <input type="checkbox" checked={form.isShared} onChange={e => set('isShared', e.target.checked)} />
+                    <Users aria-hidden="true" /> Shared
+                  </label>
+                  {form.isShared && (
+                    <span className="flex flex-1 items-center gap-2 text-[11.5px] text-muted">
+                      <input type="number" min="1" value={form.sharedN} onChange={e => set('sharedN', e.target.value)} aria-label="People sharing this subscription" className="input input-sm num !w-16" />
+                      people, my share
+                      <input type="number" min="1" max="100" value={form.sharedPct} onChange={e => set('sharedPct', e.target.value)} aria-label="Your share percentage" className="input input-sm num !w-16" />
+                      %
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div>
+              <Label htmlFor={`${id}-tags`}><Tag aria-hidden="true" /> Tags</Label>
+              <div className="tag-box">
+                {form.tags.map(tag => (
+                  <span key={tag} className="chip">
+                    {tag}<button type="button" onClick={() => set('tags', form.tags.filter(t => t !== tag))} aria-label={`Remove tag ${tag}`}><X className="h-2.5 w-2.5" aria-hidden="true" /></button>
+                  </span>
+                ))}
+                <input id={`${id}-tags`} type="text" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={addTag} placeholder={form.tags.length ? '' : 'Type and press Enter'} />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor={`${id}-url`}><Link aria-hidden="true" /> URL</Label>
+              <input id={`${id}-url`} type="text" inputMode="url" autoComplete="off" spellCheck={false} aria-invalid={Boolean(formError && form.url.trim() && !normalizeServiceUrl(form.url))} value={form.url} onChange={e => set('url', e.target.value)} placeholder="netflix.com" className="input" />
+            </div>
+            <div>
+              <Label htmlFor={`${id}-notes`}><FileText aria-hidden="true" /> Notes</Label>
+              <textarea id={`${id}-notes`} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Plan details, cancellation date…" rows={3} className="input" />
+            </div>
+          </div>
+        </Collapse>
 
         {formError && <p role="alert" className="notice danger !m-0">{formError}</p>}
       </div>

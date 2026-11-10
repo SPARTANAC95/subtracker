@@ -40,6 +40,7 @@ export function buildCalendarIcs(subs, options = {}) {
   subs.filter(sub => !sub.paused && !isCanceled(sub)).forEach(sub => {
     // One-time reminders export their end date, not a renewal series.
     if (isReminder(sub)) {
+      if (sub.scheduleVerified === false) return
       const endDate = parseLocalDate(sub.endDate)
       if (endDate && endDate >= start && endDate <= end) {
         events.push(eventBlock({

@@ -1,34 +1,43 @@
 import { useMemo } from 'react'
-import { formatMoney, makeSubConverter } from '../utils/currencies'
+import { formatMoney, formatMoneyRounded, makeSubConverter } from '../utils/currencies'
 import {
-  getBillsInRange, getEffectiveMonthlyCost, getEffectiveAmount, getMonthSpent, getMonthRange,
-  getActualSpentInRange, getYearProjectedSpent,
-  getMonthlyPaidHistory, getPaymentTimeline, isActiveSub,
+  getBillsInRange, getEffectiveMonthlyCost, getEffectiveAmount, getMonthOutlook, getMonthRange,
+  getPaymentTimeline, getYearOutlook, isActiveSub,
 } from '../utils/stats'
 import { daysBetween, formatDisplayDate } from '../utils/dates'
+import { rankColor } from '../utils/categories'
 import { isReminder } from '../utils/subscriptions'
+import { cycleLabel } from '../utils/labels'
 import PageHeading from './PageHeading'
+import ServiceMark from './ServiceMark'
 
 const round2 = value => Math.round(value * 100) / 100
 
-// The Insights tab: long-term projection, monthly spend + forecast, paid
-// against scheduled, ledger, billing pressure and recent payments. All
-// figures come from the same stats utils the rest of the app uses.
-export default function AnalyticsPanel({ subs, settings }) {
+const TOP_COUNT = 6
+const BAR_HEIGHT = 132
+
+// The Insights tab: long-term projection, monthly spend + forecast, the
+// biggest plans, ledger, billing pressure and recent payments. All figures
+// come from the same stats utils the rest of the app uses.
+export default function AnalyticsPanel({ subs, settings, onViewDetail }) {
   const currency = settings.currency || 'USD'
   // All insight figures aggregate across records, so everything here is
   // converted into the base display currency.
   const toBase = useMemo(() => makeSubConverter(settings), [settings])
 
-  // Six months of scheduled commitments plus a three-month forecast.
+  // Five months of recorded payments, this month (paid so far + what is
+  // still scheduled) and a three-month forecast from the schedule.
   const monthsData = useMemo(() => {
     const out = []
     for (let i = -5; i <= 3; i++) {
       const { start } = getMonthRange(i)
+      const outlook = getMonthOutlook(subs, i, toBase)
       out.push({
         key: `${start.getFullYear()}-${start.getMonth()}`,
         month: start.toLocaleString('default', { month: 'short' }),
-        amount: round2(getMonthSpent(subs, i, toBase)),
+        paid: round2(outlook.paid),
+        scheduled: round2(outlook.scheduled),
+        amount: round2(outlook.total),
         forecast: i > 0,
         current: i === 0,
       })
@@ -36,15 +45,13 @@ export default function AnalyticsPanel({ subs, settings }) {
     return out
   }, [subs, toBase])
 
-  // 6-month projected (billing-cycle math) vs actual paid (paymentHistory)
-  const paidVsProjected = useMemo(() => {
-    const paid = getMonthlyPaidHistory(subs, 6, toBase)
-    return paid.map((p, i) => ({
-      key: `${p.month}-${i}`,
-      month: p.month,
-      projected: round2(getMonthSpent(subs, -(5 - i), toBase)),
-      paid: p.paid,
-    }))
+  // The plans that make up most of the monthly figure.
+  const top = useMemo(() => {
+    const active = subs.filter(isActiveSub).map(sub => ({ sub, monthly: toBase(getEffectiveMonthlyCost(sub), sub) }))
+    const total = active.reduce((sum, item) => sum + item.monthly, 0)
+    const rows = active.sort((a, b) => b.monthly - a.monthly).slice(0, TOP_COUNT)
+    const shown = rows.reduce((sum, item) => sum + item.monthly, 0)
+    return { rows, total, share: total > 0 ? (shown / total) * 100 : 0, count: active.length }
   }, [subs, toBase])
 
   // Recent payment events (last 90 days, top 8). Payment dates are stored as
@@ -55,9 +62,6 @@ export default function AnalyticsPanel({ subs, settings }) {
     const events = getPaymentTimeline(subs, 4)
     return events.filter(e => daysBetween(e.date, new Date()) <= 90).slice(0, 8)
   }, [subs])
-
-  const totalPaidThisStretch = paidVsProjected.reduce((a, m) => a + m.paid, 0)
-  const totalProjectedStretch = paidVsProjected.reduce((a, m) => a + m.projected, 0)
 
   // Billing pressure: the charges that actually land on each day of the
   // current month. Walking the real schedule (instead of reading the anchor's
@@ -77,13 +81,12 @@ export default function AnalyticsPanel({ subs, settings }) {
     return { map, max: Math.max(peak, 1), peak, peakDay: peak > 0 ? map.indexOf(peak) + 1 : null, today: new Date().getDate() }
   }, [subs, toBase])
 
-  // Forecast totals
+  // Forecast totals. The year figure is what has been paid so far plus what
+  // is still scheduled before the 31st of December.
   const forecastTotals = useMemo(() => {
-    const now = new Date()
-    const ytd = getActualSpentInRange(subs, new Date(now.getFullYear(), 0, 1), now, toBase)
-    const yearProj = getYearProjectedSpent(subs, now.getFullYear(), toBase)
+    const year = getYearOutlook(subs, toBase)
     const monthly = subs.filter(isActiveSub).reduce((a, s) => a + toBase(getEffectiveMonthlyCost(s), s), 0)
-    return { ytd, yearProj, fiveYearProj: monthly * 12 * 5, tenYearProj: monthly * 12 * 10 }
+    return { ytd: year.paid, yearLeft: year.scheduled, yearProj: year.total, fiveYearProj: monthly * 12 * 5, tenYearProj: monthly * 12 * 10 }
   }, [subs, toBase])
 
   // The library at a glance.
@@ -92,12 +95,13 @@ export default function AnalyticsPanel({ subs, settings }) {
     const active = subs.filter(isActiveSub)
     const monthlyOf = s => toBase(getEffectiveMonthlyCost(s), s)
     const monthly = active.reduce((a, s) => a + monthlyOf(s), 0)
+    const estimated = active.filter(s => s.amountVerified === false).reduce((a, s) => a + monthlyOf(s), 0)
     const byCost = [...active].sort((a, b) => monthlyOf(b) - monthlyOf(a))
     const most = byCost[0]
     const cheapest = byCost[byCost.length - 1]
     return [
       { label: 'Active', value: String(active.length), sub: `of ${recurring.length} ${recurring.length === 1 ? 'subscription' : 'subscriptions'}` },
-      { label: 'Monthly', value: formatMoney(monthly, currency) },
+      { label: 'Monthly', value: formatMoney(monthly, currency), sub: estimated > 0 ? `${formatMoney(estimated, currency)} from unverified prices` : undefined },
       { label: 'Yearly', value: formatMoney(monthly * 12, currency) },
       { label: 'Average', value: formatMoney(active.length ? monthly / active.length : 0, currency), sub: 'per subscription' },
       most ? { label: 'Most expensive', value: most.name, sub: `${formatMoney(monthlyOf(most), currency)}/mo` } : null,
@@ -107,8 +111,10 @@ export default function AnalyticsPanel({ subs, settings }) {
   }, [subs, currency, toBase])
 
   const maxMonthBar = Math.max(1, ...monthsData.map(b => b.amount))
-  const maxPvp = Math.max(1, ...paidVsProjected.map(m => Math.max(m.paid, m.projected)))
-  const hasPvp = totalPaidThisStretch > 0 || totalProjectedStretch > 0
+  const barHeight = amount => Math.round((amount / maxMonthBar) * BAR_HEIGHT)
+  const monthTitle = b => b.current
+    ? `${b.month}: ${formatMoney(b.paid, currency)} paid, ${formatMoney(b.scheduled, currency)} still scheduled`
+    : `${b.month}: ${formatMoney(b.amount, currency)} ${b.forecast ? 'scheduled' : 'paid'}`
 
   return (
     <>
@@ -116,7 +122,7 @@ export default function AnalyticsPanel({ subs, settings }) {
 
       <section className="stat-grid section" aria-label="Long-term projection">
         <div className="stat"><strong>{formatMoney(forecastTotals.ytd, currency)}</strong><span>Recorded this year</span><small>From payment history</small></div>
-        <div className="stat"><strong>{formatMoney(forecastTotals.yearProj, currency)}</strong><span>This year, projected</span><small>Every scheduled charge</small></div>
+        <div className="stat"><strong>{formatMoney(forecastTotals.yearProj, currency)}</strong><span>This year, projected</span><small>Paid so far + {formatMoney(forecastTotals.yearLeft, currency)} still scheduled</small></div>
         <div className="stat"><strong>{formatMoney(forecastTotals.fiveYearProj, currency)}</strong><span>Five years</span><small>At the current rate</small></div>
         <div className="stat"><strong>{formatMoney(forecastTotals.tenYearProj, currency)}</strong><span>Ten years</span><small>At the current rate</small></div>
       </section>
@@ -126,59 +132,71 @@ export default function AnalyticsPanel({ subs, settings }) {
         <div className="section-heading">
           <div>
             <h2 id="monthly-spend-heading">Monthly spend — six months &amp; forecast</h2>
-            <p>Scheduled billing per calendar month.</p>
+            <p>Recorded payments for the months behind you, the schedule for the ones ahead.</p>
           </div>
-          <p className="legend !mt-0">
-            <span><i aria-hidden="true" />scheduled</span>
-            <span><i className="peak" aria-hidden="true" />this month</span>
-            <span><i className="ghost" aria-hidden="true" />forecast</span>
-          </p>
         </div>
-        <div className="month-bars" role="img" aria-label={`Scheduled spend per month: ${monthsData.map(b => `${b.month} ${formatMoney(b.amount, currency)}${b.forecast ? ' forecast' : ''}`).join(', ')}`}>
+        <div className="month-bars" role="img" aria-label={`Spend per month: ${monthsData.map(monthTitle).join('; ')}`}>
           {monthsData.map(b => (
-            <div key={b.key} title={`${b.month}: ${formatMoney(b.amount, currency)}${b.forecast ? ' (forecast)' : ''}`}>
-              <span className="value">{formatMoney(b.amount, currency)}</span>
-              <span
-                className={`bar ${b.forecast ? 'ghost' : b.current ? 'peak' : ''}`}
-                style={{ height: Math.max(4, (b.amount / maxMonthBar) * 132) }}
-              />
-              <small>{b.month}</small>
+            <div key={b.key} title={monthTitle(b)}>
+              <span className="value">{formatMoneyRounded(b.amount, currency)}</span>
+              {b.current ? (
+                // This month is part history, part forecast: what is already
+                // paid sits under what is still to come.
+                <span className="stack">
+                  {b.scheduled > 0 && <span className="bar ghost" style={{ height: Math.max(4, barHeight(b.scheduled)) }} />}
+                  <span className="bar peak" style={{ height: Math.max(b.scheduled > 0 ? 2 : 4, barHeight(b.paid)) }} />
+                </span>
+              ) : (
+                <span className={`bar ${b.forecast ? 'ghost' : ''}`} style={{ height: Math.max(4, barHeight(b.amount)) }} />
+              )}
+              <small className={b.current ? 'current' : undefined}>{b.month}</small>
             </div>
           ))}
         </div>
+        <p className="legend mt-3.5">
+          <span><i aria-hidden="true" />paid</span>
+          <span><i className="peak" aria-hidden="true" />paid this month</span>
+          <span><i className="ghost" aria-hidden="true" />still scheduled</span>
+        </p>
       </section>
 
       <div className="two-col section">
-        {/* Paid against scheduled */}
-        <section aria-labelledby="paid-heading">
+        {/* Biggest plans */}
+        <section aria-labelledby="top-heading">
           <div className="section-heading">
             <div>
-              <h2 id="paid-heading">Paid against scheduled</h2>
-              <p><span className="num">{formatMoney(totalPaidThisStretch, currency)}</span> paid · <span className="num">{formatMoney(totalProjectedStretch, currency)}</span> scheduled over six months.</p>
+              <h2 id="top-heading">Where the money goes</h2>
+              <p>
+                {top.rows.length
+                  ? top.count > top.rows.length
+                    ? `The ${top.rows.length} largest plans are ${top.share.toFixed(0)}% of your monthly commitment.`
+                    : 'Every active plan, largest first.'
+                  : 'Active plans, largest first.'}
+              </p>
             </div>
           </div>
-          {hasPvp ? (
-            <>
-              <div className="month-bars !h-[150px]" role="img" aria-label={`Paid against scheduled per month: ${paidVsProjected.map(m => `${m.month} ${formatMoney(m.paid, currency)} paid of ${formatMoney(m.projected, currency)} scheduled`).join(', ')}`}>
-                {paidVsProjected.map(m => (
-                  <div key={m.key} title={`${m.month}: ${formatMoney(m.paid, currency)} paid of ${formatMoney(m.projected, currency)} scheduled`}>
-                    <div className="pair-wrap">
-                      <span className="bar pair peak" style={{ height: Math.max(3, (m.paid / maxPvp) * 118) }} />
-                      <span className="bar pair" style={{ height: Math.max(3, (m.projected / maxPvp) * 118) }} />
-                    </div>
-                    <small>{m.month}</small>
-                  </div>
-                ))}
-              </div>
-              <p className="legend mt-3.5">
-                <span><i className="peak" aria-hidden="true" />recorded paid</span>
-                <span><i aria-hidden="true" />scheduled</span>
-              </p>
-            </>
+          {top.rows.length ? (
+            <div className="flex flex-col gap-3.5">
+              {top.rows.map(({ sub, monthly }, rank) => {
+                const pct = top.total > 0 ? (monthly / top.total) * 100 : 0
+                return (
+                  <button key={sub.id} type="button" className="top-row" onClick={() => onViewDetail?.(sub)}>
+                    <ServiceMark sub={sub} size={30} />
+                    <span className="rank-bar">
+                      <span>
+                        <span className="ellipsis">{sub.name}<small>{cycleLabel(sub.cycle).toLowerCase()}</small></span>
+                        <span className="num">{formatMoney(monthly, currency)}/mo · {pct.toFixed(0)}%</span>
+                      </span>
+                      <span className="meter"><span style={{ width: `${pct}%`, background: rankColor(rank) }} /></span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           ) : (
             <div className="empty compact panel">
-              <h3>No payments logged yet</h3>
-              <p>Use Mark paid on a subscription to start tracking.</p>
+              <h3>No active subscriptions</h3>
+              <p>Paused plans, trials and reminders are not counted here.</p>
             </div>
           )}
         </section>

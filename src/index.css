@@ -1539,20 +1539,22 @@
     border-bottom: 0;
     background: transparent;
   }
-  .month-bars .bar.pair {
-    max-width: 16px;
-  }
-  .month-bars .pair-wrap {
+  /* The current month: paid so far, with what is still scheduled on top. */
+  .month-bars .stack {
     display: flex;
-    flex: 1;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 4px;
+    flex-direction: column;
     width: 100%;
+    max-width: 44px;
+  }
+  .month-bars .stack .bar + .bar {
+    border-radius: 0 0 1px 1px;
   }
   .month-bars small {
     color: var(--color-muted);
     font-size: 10px;
+  }
+  .month-bars small.current {
+    color: var(--color-fg);
   }
   .month-bars .value {
     max-width: 100%;
@@ -1594,16 +1596,48 @@
     flex-direction: column;
     gap: 7px;
   }
-  .rank-bar > div:first-child {
+  .rank-bar > :first-child {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
     font-size: 12px;
   }
-  .rank-bar > div:first-child > span:last-child {
+  .rank-bar > :first-child > span:last-child {
+    flex-shrink: 0;
     color: var(--color-muted);
     font-size: 11px;
+  }
+  .rank-bar small {
+    margin-left: 7px;
+    color: var(--color-dim);
+    font-size: 10.5px;
+  }
+
+  /* A ranked plan on the Insights page: opens its detail panel. */
+  .top-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin: -5px -8px;
+    padding: 5px 8px;
+    border-radius: 7px;
+    text-align: left;
+    transition: background 130ms;
+  }
+  .top-row:hover {
+    background: #ffffff09;
+  }
+  .top-row .rank-bar {
+    flex: 1;
+    min-width: 0;
+  }
+  .top-row .meter {
+    display: block;
+  }
+  .top-row .meter > span {
+    display: block;
   }
 
   .day-grid {
@@ -2278,6 +2312,30 @@
     height: 13px;
     margin-top: 2px;
   }
+  .verify-note {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 11px 12px 11px 14px;
+    border: 1px solid #473723;
+    border-radius: 8px;
+    background: #1d1a14;
+    color: #c3ad87;
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+  .verify-note p {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .verify-note p > span {
+    flex: 1;
+    min-width: 0;
+  }
+  .verify-note .btn {
+    flex-shrink: 0;
+  }
   .meta-row {
     display: flex;
     align-items: center;
@@ -2558,7 +2616,127 @@
   }
 }
 
-/* ── 8. Motion ─────────────────────────────────────────────────────── */
+/* ── 8. Motion ─────────────────────────────────────────────────────────
+   Everything animates with plain CSS. Elements play their way in when they
+   mount; <Presence> (components/Presence.jsx) keeps a dismissed element
+   mounted for a moment and marks it [data-leaving] so it can play its way
+   out. Only opacity and transform move, so it all stays on the compositor. */
+
+@layer components {
+  .modal-backdrop,
+  .drawer-backdrop,
+  .palette-backdrop {
+    animation: fade-in 150ms ease-out both;
+  }
+  .modal,
+  .palette {
+    animation: rise-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  }
+  .drawer {
+    animation: drawer-in 230ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  }
+  .toast {
+    animation: rise-in 170ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  }
+  .bulk-bar {
+    animation: drop-in 150ms ease-out both;
+  }
+
+  /* On the way out: stop catching clicks at once, then fade. */
+  [data-leaving] {
+    pointer-events: none !important;
+  }
+  .modal-backdrop[data-leaving],
+  .drawer-backdrop[data-leaving],
+  .palette-backdrop[data-leaving] {
+    animation: fade-out 150ms ease-in both;
+  }
+  [data-leaving] > .modal,
+  [data-leaving] > .palette,
+  .toast[data-leaving] {
+    animation: sink-out 140ms ease-in both;
+  }
+  [data-leaving] > .drawer {
+    animation: drawer-out 190ms cubic-bezier(0.5, 0, 0.9, 0.4) both;
+  }
+
+  /* Collapsible block: a one-row grid whose track opens from 0fr to 1fr, so
+     content of any height can unfold without measuring it. The 3px inset
+     keeps focus rings inside the clipped box. */
+  .collapse-box {
+    display: grid;
+    grid-template-rows: 1fr;
+    animation: unfold 190ms ease-out both;
+  }
+  .collapse-box > div {
+    min-height: 0;
+    margin: -3px;
+    padding: 3px;
+    overflow: hidden;
+  }
+  .collapse-box[data-leaving] {
+    animation: fold 180ms ease-in both;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes sink-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes drawer-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes unfold {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes fold {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
 
 @keyframes page-in {
   from {
@@ -2601,5 +2779,9 @@
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+  /* Nothing animates out, so a dismissed element just disappears. */
+  [data-leaving] {
+    visibility: hidden !important;
   }
 }

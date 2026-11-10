@@ -56,20 +56,23 @@ export function advanceCycle(date, cycle, anchorDay) {
 // edit, which makes a WeakMap on the object identity self-invalidating.
 const nextBillingCache = new WeakMap()
 
+// Returns null when the record has no schedule to speak of: no usable anchor,
+// or a date marked unverified (those stay out of every forecast and alert).
 export function getNextBillingDate(sub) {
-  if (!sub || typeof sub !== 'object') return startOfDay(new Date())
+  if (!sub || typeof sub !== 'object' || sub.scheduleVerified === false) return null
   const cached = nextBillingCache.get(sub)
-  if (cached) return new Date(cached)
+  if (cached !== undefined) return cached === null ? null : new Date(cached)
 
-  const computed = computeNextBillingDate(sub)
-  nextBillingCache.set(sub, computed)
-  return new Date(computed)
+  const timestamp = computeNextBillingDate(sub)?.getTime()
+  const value = Number.isFinite(timestamp) ? timestamp : null
+  nextBillingCache.set(sub, value)
+  return value === null ? null : new Date(value)
 }
 
 function computeNextBillingDate(sub) {
-  if (!sub.billingDate) return startOfDay(new Date())
+  if (!sub.billingDate) return null
   const anchor = startOfDay(sub.billingDate)
-  if (!anchor) return startOfDay(new Date())
+  if (!anchor) return null
   const anchorDay = anchor.getDate()
   const settled = getSettledDueDates(sub, anchor, anchorDay)
   let next = new Date(anchor)
@@ -80,8 +83,10 @@ function computeNextBillingDate(sub) {
   return next
 }
 
+// Signed days until the next unsettled occurrence; null without a schedule.
 export function getDaysUntilBilling(sub) {
-  return daysBetween(new Date(), getNextBillingDate(sub))
+  const next = getNextBillingDate(sub)
+  return next ? daysBetween(new Date(), next) : null
 }
 
 function getSettledDueDates(sub, anchor, anchorDay) {
@@ -162,6 +167,7 @@ export function reactivateSubscription(sub, from = new Date()) {
 // past — what "overdue" actually consists of for a record that has been
 // left alone for several cycles.
 export function getMissedOccurrences(sub, from = new Date()) {
+  if (sub?.scheduleVerified === false) return []
   const today = startOfDay(from) || startOfDay(new Date())
   const anchor = startOfDay(sub?.billingDate)
   if (!anchor || anchor >= today) return []
@@ -179,19 +185,21 @@ export function getMissedOccurrences(sub, from = new Date()) {
 
 export function recordSubscriptionPayment(sub, options = {}) {
   const paidAt = formatDateOnly(options.paidAt || new Date())
-  const dueFor = formatDateOnly(options.dueFor || getNextBillingDate(sub))
+  // A record without a verified schedule has no due date to settle: the
+  // payment is still recorded, it just is not tied to an occurrence.
+  const nextDue = options.dueFor || getNextBillingDate(sub)
+  const dueFor = nextDue ? formatDateOnly(nextDue) : null
   const amount = Number.isFinite(Number(options.amount)) ? Number(options.amount) : getEffectiveAmount(sub)
   const history = Array.isArray(sub.paymentHistory) ? sub.paymentHistory : []
-  if (history.some(payment => payment.dueFor && formatDateOnly(payment.dueFor) === dueFor)) return sub
-  return {
-    ...sub,
-    lastPaid: paidAt,
-    paymentHistory: [...history, { date: paidAt, paidAt, dueFor, amount, ...(sub.currency ? { currency: sub.currency } : {}) }],
-  }
+  if (dueFor && history.some(payment => payment.dueFor && formatDateOnly(payment.dueFor) === dueFor)) return sub
+  const payment = { date: paidAt, paidAt, ...(dueFor ? { dueFor } : {}), amount, ...(sub.currency ? { currency: sub.currency } : {}) }
+  return { ...sub, lastPaid: paidAt, paymentHistory: [...history, payment] }
 }
 
 export function undoSubscriptionPayment(sub, paidAt, dueFor) {
-  const paymentHistory = (sub.paymentHistory || []).filter(p => !(p.paidAt === paidAt && p.dueFor === dueFor))
+  // A payment recorded without a schedule has no `dueFor` at all, so compare
+  // "missing" as equal to null rather than undefined !== null.
+  const paymentHistory = (sub.paymentHistory || []).filter(p => !(p.paidAt === paidAt && (p.dueFor || null) === (dueFor || null)))
   const lastPaid = paymentHistory.map(p => p.paidAt || p.date).filter(Boolean).sort().at(-1) || null
   return { ...sub, paymentHistory, lastPaid }
 }
@@ -211,7 +219,7 @@ export function getCategoryBreakdown(subs, convert = IDENTITY) {
 // ── Billing-event range helpers ──
 
 export function getBillsInRange(sub, start, end) {
-  if (!sub.billingDate) return []
+  if (sub.scheduleVerified === false || !sub.billingDate) return []
   const anchor = startOfDay(sub.billingDate)
   const s = startOfDay(start)
   const e = startOfDay(end)
@@ -233,11 +241,47 @@ export function getBillsInRange(sub, start, end) {
   return bills
 }
 
-export function getSpentInRange(subs, start, end, { includeTrials = false, convert = IDENTITY } = {}) {
-  return subs.filter(s => isActiveSub(s) || (includeTrials && !isReminder(s) && !s.paused && !isCanceled(s))).reduce((sum, s) => {
-    const bills = getBillsInRange(s, start, end)
-    return sum + bills.length * convert(getEffectiveAmount(s), s)
+// Every due date the payment history accounts for: the ones a payment was
+// recorded against, plus — for older entries saved without a due date — the
+// scheduled occurrence nearest the day it was paid. The same set decides the
+// next renewal, so "what is next" and "what is still scheduled" cannot
+// disagree about a payment.
+function settledDueDates(sub) {
+  const anchor = startOfDay(sub?.billingDate)
+  return anchor ? getSettledDueDates(sub, anchor, anchor.getDate()) : new Set()
+}
+
+// What is still scheduled to be charged between two days (inclusive): every
+// occurrence of every active subscription that has not been paid already.
+export function getScheduledInRange(subs, start, end, convert = IDENTITY) {
+  return subs.filter(isActiveSub).reduce((sum, sub) => {
+    const settled = settledDueDates(sub)
+    const open = getBillsInRange(sub, start, end).filter(date => !settled.has(formatDateOnly(date)))
+    return sum + open.length * convert(getEffectiveAmount(sub), sub)
   }, 0)
+}
+
+// What a stretch of calendar costs: recorded payments for the days already
+// behind us plus the charges still scheduled from today on. A schedule only
+// exists from its anchor date forward, so the past can only be read from the
+// payment history — asking the schedule about last spring returns nothing.
+export function getSpendOutlook(subs, start, end, convert = IDENTITY, now = new Date()) {
+  const from = startOfDay(start)
+  const to = startOfDay(end)
+  const today = startOfDay(now)
+  if (!from || !to || !today || to < from) return { paid: 0, scheduled: 0, total: 0 }
+  const paid = from <= today ? getActualSpentInRange(subs, from, to < today ? to : today, convert) : 0
+  const scheduled = to >= today ? getScheduledInRange(subs, from > today ? from : today, to, convert) : 0
+  return { paid, scheduled, total: paid + scheduled }
+}
+
+export function getMonthOutlook(subs, offsetFromNow = 0, convert = IDENTITY, now = new Date()) {
+  const { start, end } = getMonthRange(offsetFromNow, now)
+  return getSpendOutlook(subs, start, end, convert, now)
+}
+
+export function getYearOutlook(subs, convert = IDENTITY, now = new Date()) {
+  return getSpendOutlook(subs, new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31), convert, now)
 }
 
 // Every scheduled charge from today through `days` ahead, flattened into one
@@ -251,14 +295,10 @@ export function getUpcomingCharges(subs, days, convert = IDENTITY) {
 
   subs.filter(isActiveSub).forEach(sub => {
     const amount = convert(getEffectiveAmount(sub), sub)
-    // Occurrences already settled by an explicit payment must not re-appear
-    // as upcoming cash — right after "restart from today" the new anchor IS
+    // Occurrences already settled by a payment must not re-appear as
+    // upcoming cash — right after "restart from today" the new anchor IS
     // today, but that occurrence was just paid.
-    const settled = new Set(
-      (sub.paymentHistory || [])
-        .map(payment => (payment.dueFor ? formatDateOnly(payment.dueFor) : null))
-        .filter(Boolean)
-    )
+    const settled = settledDueDates(sub)
     getBillsInRange(sub, today, end).forEach(date => {
       if (settled.has(formatDateOnly(date))) return
       events.push({ sub, date, days: daysBetween(today, date), amount, type: 'renewal' })
@@ -272,17 +312,6 @@ export function getMonthRange(offsetFromNow = 0, base = new Date()) {
   const start = new Date(base.getFullYear(), base.getMonth() + offsetFromNow, 1)
   const end = new Date(base.getFullYear(), base.getMonth() + offsetFromNow + 1, 0)
   return { start: startOfDay(start), end: startOfDay(end) }
-}
-
-export function getMonthSpent(subs, offsetFromNow = 0, convert = IDENTITY) {
-  const { start, end } = getMonthRange(offsetFromNow)
-  return getSpentInRange(subs, start, end, { convert })
-}
-
-export function getYearProjectedSpent(subs, year = new Date().getFullYear(), convert = IDENTITY) {
-  const start = new Date(year, 0, 1)
-  const end = new Date(year, 11, 31)
-  return getSpentInRange(subs, start, end, { convert })
 }
 
 export function getPaidThisMonth(subs, convert = IDENTITY) {
@@ -304,17 +333,6 @@ export function getActualSpentInRange(subs, start, end, convert = IDENTITY) {
   }, 0)
 }
 
-export function getMonthlyPaidHistory(subs, months = 6, convert = IDENTITY) {
-  const now = new Date()
-  const out = []
-  for (let i = months - 1; i >= 0; i--) {
-    const { start, end } = getMonthRange(-i, now)
-    const label = start.toLocaleString('default', { month: 'short' })
-    out.push({ month: label, paid: Math.round(getActualSpentInRange(subs, start, end, convert) * 100) / 100 })
-  }
-  return out
-}
-
 export function getPaymentTimeline(subs, months = 6) {
   const now = new Date()
   const start = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
@@ -330,13 +348,18 @@ export function getPaymentTimeline(subs, months = 6) {
 }
 
 export function getOverdueSubs(subs) {
-  return subs.filter(s => isActiveSub(s) && getDaysUntilBilling(s) < 0)
+  return subs.filter(s => {
+    if (!isActiveSub(s)) return false
+    const days = getDaysUntilBilling(s)
+    return days != null && days < 0
+  })
 }
 
 // ── Reminder (one-time / prepaid) helpers ──
 
 // Signed days until the reminder's end date; null when no end date is set.
 export function getReminderDaysLeft(sub, from = new Date()) {
+  if (sub?.scheduleVerified === false) return null
   const end = parseLocalDate(sub?.endDate)
   return end ? daysBetween(from, end) : null
 }

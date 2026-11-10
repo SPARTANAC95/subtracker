@@ -5,7 +5,9 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist', 'local', 'node_modules', '*.html'] },
+  // `data` is the user's data folder and `output` holds test artefacts —
+  // neither contains source, and both can hold old build copies.
+  { ignores: ['dist', 'local', 'data', 'output', 'node_modules', '*.html'] },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {

@@ -4,7 +4,8 @@ import { formatMoney } from '../utils/currencies'
 import { getReminderDaysLeft } from '../utils/stats'
 import { getCategoryById } from '../utils/categories'
 import { formatDisplayDate } from '../utils/dates'
-import { REMINDER_ENDING_SOON_DAYS as ENDING_SOON_DAYS, plural, reminderEndPhrase as endPhrase, reminderState } from '../utils/labels'
+import { REMINDER_ENDING_SOON_DAYS as ENDING_SOON_DAYS, UNVERIFIED_REMINDER, plural, reminderEndPhrase, reminderState } from '../utils/labels'
+import useMediaQuery, { WIDE_LAYOUT } from '../hooks/useMediaQuery'
 import PageHeading from './PageHeading'
 import ServiceMark from './ServiceMark'
 import StatusBadge from './StatusBadge'
@@ -12,11 +13,15 @@ import StatusBadge from './StatusBadge'
 const LONG_DATE = { month: 'short', day: 'numeric', year: 'numeric' }
 const SHORT_DATE = { month: 'short', day: 'numeric' }
 
+const unverified = sub => sub.scheduleVerified === false
+const endPhrase = (sub, days) => (unverified(sub) ? 'Left out of alerts' : reminderEndPhrase(days))
+const endDateText = (sub, format) => (unverified(sub) ? 'Unverified' : sub.endDate ? formatDisplayDate(sub.endDate, format) : '—')
+
 export default function RemindersPanel({ reminders, currency, toBase, onAdd, onEdit, onDelete, onViewDetail }) {
   const rows = useMemo(() => {
     const items = reminders.map(sub => {
       const days = getReminderDaysLeft(sub)
-      return { sub, days, state: reminderState(days) }
+      return { sub, days, state: unverified(sub) ? UNVERIFIED_REMINDER : reminderState(days) }
     })
     // Soonest-ending first — expired items float to the top the same way
     // overdue renewals do, since they are the ones asking for a decision.
@@ -34,6 +39,8 @@ export default function RemindersPanel({ reminders, currency, toBase, onAdd, onE
     .reduce((sum, item) => sum + inBase(item.sub.amount, item.sub), 0), [rows, inBase])
   const endingSoon = rows.filter(item => item.state.id === 'soon').length
   const expired = rows.filter(item => item.state.id === 'expired').length
+  const unverifiedDates = rows.filter(item => item.state.id === 'unverified').length
+  const wide = useMediaQuery(WIDE_LAYOUT)
 
   if (reminders.length === 0) {
     return (
@@ -58,10 +65,10 @@ export default function RemindersPanel({ reminders, currency, toBase, onAdd, onE
         <span aria-hidden="true"> · </span><span className="num">{formatMoney(liveValue, currency)}</span> still running
         {endingSoon > 0 && <><span aria-hidden="true"> · </span><span className="warn">{endingSoon} ending within {ENDING_SOON_DAYS} days</span></>}
         {expired > 0 && <><span aria-hidden="true"> · </span><span className="danger">{expired} expired</span></>}
+        {unverifiedDates > 0 && <><span aria-hidden="true"> · </span>{unverifiedDates} with an unverified end date</>}
       </PageHeading>
 
-      {/* Desktop table */}
-      <div className="hidden md:block">
+      {wide ? (
         <table className="data-table">
           <caption className="sr-only">One-time purchases and their end dates</caption>
           <thead>
@@ -88,8 +95,8 @@ export default function RemindersPanel({ reminders, currency, toBase, onAdd, onE
                 </td>
                 <td><StatusBadge tone={state.tone}>{state.label}</StatusBadge></td>
                 <td>
-                  <span className="num text-soft">{sub.endDate ? formatDisplayDate(sub.endDate, LONG_DATE) : '—'}</span>
-                  <span className={`sub ${days != null && days < 0 ? 'danger' : ''}`}>{endPhrase(days)}</span>
+                  <span className="num text-soft">{endDateText(sub, LONG_DATE)}</span>
+                  <span className={`sub ${days != null && days < 0 ? 'danger' : ''}`}>{endPhrase(sub, days)}</span>
                 </td>
                 <td className="num hidden text-muted xl:table-cell">
                   {sub.startDate ? formatDisplayDate(sub.startDate, LONG_DATE) : '—'}
@@ -102,35 +109,34 @@ export default function RemindersPanel({ reminders, currency, toBase, onAdd, onE
             ))}
           </tbody>
         </table>
-      </div>
-
-      {/* Mobile cards */}
-      <div className="simple-list md:hidden">
-        {rows.map(({ sub, days, state }) => (
-          <article key={sub.id} className="px-1.5 py-3">
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={() => onViewDetail?.(sub)} className="row-title flex-1">
-                <ServiceMark sub={sub} />
-                <span>
-                  <strong>{sub.name}</strong>
-                  <small>{getCategoryById(sub.category).label}</small>
+      ) : (
+        <div className="simple-list">
+          {rows.map(({ sub, days, state }) => (
+            <article key={sub.id} className="px-1.5 py-3">
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => onViewDetail?.(sub)} className="row-title flex-1">
+                  <ServiceMark sub={sub} />
+                  <span>
+                    <strong>{sub.name}</strong>
+                    <small>{getCategoryById(sub.category).label}</small>
+                  </span>
+                </button>
+                <span className="num text-[12.5px] font-[560]">{formatMoney(sub.amount, sub.currency || currency)}</span>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between gap-3">
+                <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+                <span className={`num min-w-0 flex-1 truncate text-[11px] ${days != null && days < 0 ? 'text-danger' : 'text-muted'}`}>
+                  {unverified(sub) ? 'Date unverified · left out of alerts' : sub.endDate ? `${formatDisplayDate(sub.endDate, SHORT_DATE)} · ${endPhrase(sub, days)}` : 'No end date'}
                 </span>
-              </button>
-              <span className="num text-[12.5px] font-[560]">{formatMoney(sub.amount, sub.currency || currency)}</span>
-            </div>
-            <div className="mt-2.5 flex items-center justify-between gap-3">
-              <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-              <span className={`num min-w-0 flex-1 truncate text-[11px] ${days != null && days < 0 ? 'text-danger' : 'text-muted'}`}>
-                {sub.endDate ? `${formatDisplayDate(sub.endDate, SHORT_DATE)} · ${endPhrase(days)}` : 'No end date'}
-              </span>
-              <RowActions sub={sub} onEdit={onEdit} onDelete={onDelete} />
-            </div>
-          </article>
-        ))}
-      </div>
+                <RowActions sub={sub} onEdit={onEdit} onDelete={onDelete} />
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
 
       <p className="fine-print mt-6 max-w-[620px]">
-        Reminders are one-time purchases — they never renew on their own and are not counted in monthly commitment. You get a notification and a calendar entry before each end date.
+        Reminders are one-time purchases — they never renew on their own and are not counted in monthly commitment. You get a notification and a calendar entry before each confirmed end date.
       </p>
     </section>
   )

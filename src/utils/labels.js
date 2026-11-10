@@ -72,6 +72,9 @@ export function paymentLabel(id) {
 // Same tones as STATUS_STYLES: ok = fine, warn = act soon, danger = past due.
 export const REMINDER_ENDING_SOON_DAYS = 30
 
+// A reminder whose end date came from an import and was never confirmed.
+export const UNVERIFIED_REMINDER = { id: 'unverified', label: 'Unverified date', tone: 'muted' }
+
 export function reminderState(days) {
   if (days == null || Number.isNaN(days)) return { id: 'undated', label: 'No end date', tone: 'muted' }
   if (days < 0) return { id: 'expired', label: 'Expired', tone: 'danger' }

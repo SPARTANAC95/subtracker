@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import {
   Archive, Check, Eye, MoreHorizontal, Pause, Pencil, Play,
   Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X,
@@ -10,6 +9,7 @@ import { getEffectiveMonthlyCost, getDaysUntilBilling, getNextBillingDate } from
 import { getSubscriptionStatus } from '../utils/subscriptions'
 import { STATUS_STYLES, cycleLabel, plural, relativeDay } from '../utils/labels'
 import { daysBetween, formatDisplayDate, parseLocalDate } from '../utils/dates'
+import useMediaQuery, { WIDE_LAYOUT } from '../hooks/useMediaQuery'
 import PageHeading from './PageHeading'
 import ServiceMark from './ServiceMark'
 import StatusBadge from './StatusBadge'
@@ -83,6 +83,15 @@ function renewalInfo(sub) {
   }
 
   const next = getNextBillingDate(sub)
+  // No confirmed date (an imported record nobody has verified yet): say so
+  // instead of inventing a schedule state.
+  if (!next) {
+    return {
+      primary: 'Unverified',
+      secondary: status === 'paused' ? 'Schedule paused' : 'Renewal date not confirmed',
+      badge: status === 'paused' ? STATUS_STYLES.paused : { label: 'Unverified', tone: 'muted' },
+    }
+  }
   const days = getDaysUntilBilling(sub)
   const overdue = status === 'active' && days < 0
   return {
@@ -117,6 +126,9 @@ export default function SubscriptionList({
   const [selected, setSelected] = useState(() => new Set())
   const [activeMenu, setActiveMenu] = useState(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // Only the layout that is on screen is built: a table on wide windows,
+  // cards on narrow ones.
+  const wide = useMediaQuery(WIDE_LAYOUT)
 
   useEffect(() => {
     const ids = new Set(subs.map(sub => sub.id))
@@ -196,6 +208,9 @@ export default function SubscriptionList({
   const activeCommitment = useMemo(() => subs
     .filter(sub => getSubscriptionStatus(sub) === 'active')
     .reduce((total, sub) => total + inBase(getEffectiveMonthlyCost(sub), sub), 0), [subs, inBase])
+  const estimatedCommitment = useMemo(() => subs
+    .filter(sub => getSubscriptionStatus(sub) === 'active' && sub.amountVerified === false)
+    .reduce((total, sub) => total + inBase(getEffectiveMonthlyCost(sub), sub), 0), [subs, inBase])
   const afterTrials = useMemo(() => activeCommitment + subs
     .filter(sub => getSubscriptionStatus(sub) === 'trial')
     .reduce((total, sub) => total + inBase(getEffectiveMonthlyCost(sub), sub), 0), [subs, activeCommitment, inBase])
@@ -263,6 +278,7 @@ export default function SubscriptionList({
       <PageHeading title="Subscriptions" id="subscriptions-heading">
         {subs.length} {plural(subs.length, 'subscription')}
         <span aria-hidden="true"> · </span><span className="num">{formatMoney(activeCommitment, currency)}</span>/mo commitment
+        {estimatedCommitment > 0 && <> (<span className="num">{formatMoney(estimatedCommitment, currency)}</span> of it unverified prices)</>}
         {statusCounts.trial > 0 && <><span aria-hidden="true"> · </span><span className="num">{formatMoney(afterTrials, currency)}</span>/mo after trials</>}
       </PageHeading>
 
@@ -319,34 +335,28 @@ export default function SubscriptionList({
         </div>
       </div>
 
-      <AnimatePresence initial={false}>
-        {selectedIds.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.14 }}
-            className="bulk-bar"
-          >
-            <span>{selectedIds.length} selected</span>
-            {/* Selection is cleared when the status tab changes, so every
-                selected record shares the current tab's lifecycle state —
-                offer only the actions that make sense for it. */}
-            {statusFilter === 'canceled' ? (
-              <>
-                <button type="button" onClick={() => { onBulkReactivate?.(selectedIds); clearSelection() }} className="btn btn-sm"><RotateCcw aria-hidden="true" /> Reactivate</button>
-                <button type="button" onClick={async () => { if (await onBulkDelete?.(selectedIds)) clearSelection() }} className="btn btn-sm btn-danger"><Trash2 aria-hidden="true" /> Delete</button>
-              </>
-            ) : (
-              <>
-                {statusFilter === 'paused'
-                  ? <button type="button" onClick={() => { onBulkResume?.(selectedIds); clearSelection() }} className="btn btn-sm"><Play aria-hidden="true" /> Resume</button>
-                  : <button type="button" onClick={() => { onBulkPause?.(selectedIds); clearSelection() }} className="btn btn-sm"><Pause aria-hidden="true" /> Pause</button>}
-                <button type="button" onClick={async () => { if (await onBulkDelete?.(selectedIds)) clearSelection() }} className="btn btn-sm btn-danger"><Archive aria-hidden="true" /> Archive</button>
-              </>
-            )}
-            <button type="button" onClick={clearSelection} className="btn btn-icon" aria-label="Clear selection"><X aria-hidden="true" /></button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {selectedIds.length > 0 && (
+        <div className="bulk-bar">
+          <span>{selectedIds.length} selected</span>
+          {/* Selection is cleared when the status tab changes, so every
+              selected record shares the current tab's lifecycle state —
+              offer only the actions that make sense for it. */}
+          {statusFilter === 'canceled' ? (
+            <>
+              <button type="button" onClick={() => { onBulkReactivate?.(selectedIds); clearSelection() }} className="btn btn-sm"><RotateCcw aria-hidden="true" /> Reactivate</button>
+              <button type="button" onClick={async () => { if (await onBulkDelete?.(selectedIds)) clearSelection() }} className="btn btn-sm btn-danger"><Trash2 aria-hidden="true" /> Delete</button>
+            </>
+          ) : (
+            <>
+              {statusFilter === 'paused'
+                ? <button type="button" onClick={() => { onBulkResume?.(selectedIds); clearSelection() }} className="btn btn-sm"><Play aria-hidden="true" /> Resume</button>
+                : <button type="button" onClick={() => { onBulkPause?.(selectedIds); clearSelection() }} className="btn btn-sm"><Pause aria-hidden="true" /> Pause</button>}
+              <button type="button" onClick={async () => { if (await onBulkDelete?.(selectedIds)) clearSelection() }} className="btn btn-sm btn-danger"><Archive aria-hidden="true" /> Archive</button>
+            </>
+          )}
+          <button type="button" onClick={clearSelection} className="btn btn-icon" aria-label="Clear selection"><X aria-hidden="true" /></button>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -365,7 +375,7 @@ export default function SubscriptionList({
             </button>
           </div>
 
-          <div className="hidden md:block">
+          {wide ? (
             <table className="data-table">
               <caption className="sr-only">Filtered subscription library</caption>
               <thead>
@@ -385,11 +395,11 @@ export default function SubscriptionList({
                 {filtered.map(sub => <DesktopRow key={sub.id} {...rowProps(sub)} />)}
               </tbody>
             </table>
-          </div>
-
-          <div className="simple-list md:hidden">
-            {filtered.map(sub => <MobileRow key={sub.id} {...rowProps(sub)} />)}
-          </div>
+          ) : (
+            <div className="simple-list">
+              {filtered.map(sub => <MobileRow key={sub.id} {...rowProps(sub)} />)}
+            </div>
+          )}
         </>
       )}
     </section>
@@ -426,9 +436,11 @@ function DesktopRow({ sub, currency, toBase, selected, active, menuOpen, onToggl
         {/* Native currency first; the ≈ line translates it into the display
             currency so mixed-currency libraries stay comparable. */}
         <span className="num font-[560]">{formatMoney(monthly, subCurrency)}</span>
-        {subCurrency !== currency
-          ? <span className="sub num">≈ {formatMoney(toBase(monthly, sub), currency)}/mo</span>
-          : sub.cycle !== 'monthly' && <span className="sub">monthly equivalent</span>}
+        {sub.amountVerified === false
+          ? <span className="sub">price estimate</span>
+          : subCurrency !== currency
+            ? <span className="sub num">≈ {formatMoney(toBase(monthly, sub), currency)}/mo</span>
+            : sub.cycle !== 'monthly' && <span className="sub">monthly equivalent</span>}
       </td>
       <td className="text-right">
         <MoreMenu
@@ -472,7 +484,9 @@ function MobileRow({ sub, currency, toBase, selected, active, menuOpen, onToggle
         </span>
         <span className="text-right">
           <span className="num text-[12.5px] font-[560]">{formatMoney(monthly, subCurrency)}<span className="font-normal text-dim">/mo</span></span>
-          {subCurrency !== currency && <span className="num block text-[10.5px] text-dim">≈ {formatMoney(toBase(monthly, sub), currency)}</span>}
+          {sub.amountVerified === false
+            ? <span className="block text-[10.5px] text-dim">price estimate</span>
+            : subCurrency !== currency && <span className="num block text-[10.5px] text-dim">≈ {formatMoney(toBase(monthly, sub), currency)}</span>}
         </span>
       </button>
     </article>

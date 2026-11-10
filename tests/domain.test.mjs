@@ -12,6 +12,10 @@ import {
   getMissedOccurrences,
   getUpcomingCharges,
   getActualSpentInRange,
+  getMonthOutlook,
+  getOverdueSubs,
+  getScheduledInRange,
+  getYearOutlook,
   reactivateSubscription,
   recordSubscriptionPayment,
   undoSubscriptionPayment,
@@ -474,4 +478,76 @@ test('calendar export escapes Windows line endings in names', () => {
   })
   assert.ok(ics.includes('SUMMARY:Line\\nBreak renewal\r\n'), 'line break in a name was not folded into an escaped \\n')
   assert.ok(!/SUMMARY:[^\r\n]*\r(?!\n)/.test(ics), 'a bare carriage return leaked into a SUMMARY line')
+})
+
+test('an unverified schedule stays out of forecasts, alerts and the calendar', () => {
+  // Records written before the flags existed are verified by default.
+  assert.equal(normalizeSubscription(sub()).scheduleVerified, true)
+  assert.equal(normalizeSubscription(sub()).amountVerified, true)
+
+  const imported = normalizeSubscription(sub({ billingDate: '2026-07-15', scheduleVerified: false, amountVerified: false }))
+  assert.equal(imported.scheduleVerified, false)
+  assert.equal(imported.amountVerified, false)
+  // Still a live commitment — only its dates are in doubt.
+  assert.equal(isActiveSub(imported), true)
+  assert.equal(getNextBillingDate(imported), null)
+  assert.equal(getDaysUntilBilling(imported), null)
+  assert.deepEqual(getBillsInRange(imported, '2026-07-01', '2026-12-31'), [])
+  assert.deepEqual(getMissedOccurrences(imported, '2027-01-01'), [])
+  assert.deepEqual(getOverdueSubs([imported]), [])
+  assert.equal(getUpcomingCharges([imported], 365).length, 0)
+  assert.equal(getScheduledInRange([imported], '2026-07-01', '2026-12-31'), 0)
+
+  const reminder = normalizeSubscription(sub({ id: 'license', kind: 'reminder', endDate: '2026-07-20', scheduleVerified: false }))
+  assert.equal(getReminderDaysLeft(reminder, '2026-07-01'), null)
+  assert.deepEqual(getEndingReminders([reminder], 365), [])
+  const ics = buildCalendarIcs([imported, reminder], { start: '2026-07-01', end: '2026-07-31', now: new Date('2026-07-01T00:00:00Z') })
+  assert.ok(!ics.includes('BEGIN:VEVENT'), 'an unverified date reached the calendar export')
+})
+
+test('a payment on an unverified schedule is logged without a due date and can be undone', () => {
+  const imported = normalizeSubscription(sub({ scheduleVerified: false }))
+  const paid = recordSubscriptionPayment(imported, { paidAt: '2026-07-02' })
+  assert.equal(paid.paymentHistory.length, 1)
+  assert.equal('dueFor' in paid.paymentHistory[0], false)
+  assert.equal(paid.lastPaid, '2026-07-02')
+  // With no due date to collide on, a second payment is not a duplicate.
+  assert.equal(recordSubscriptionPayment(paid, { paidAt: '2026-07-03' }).paymentHistory.length, 2)
+  const undone = undoSubscriptionPayment(paid, '2026-07-02', null)
+  assert.equal(undone.paymentHistory.length, 0)
+  assert.equal(undone.lastPaid, null)
+})
+
+test('the spend outlook reads the past from payments and the future from the schedule', () => {
+  const now = new Date(2026, 6, 15) // 15 July 2026
+  // The schedule starts on its anchor (20 July). Two older payments exist,
+  // but nothing was ever "scheduled" for those months.
+  const plan = normalizeSubscription(sub({
+    billingDate: '2026-07-20',
+    paymentHistory: [{ date: '2026-04-20', amount: 9 }, { date: '2026-05-20', amount: 9 }],
+  }))
+  assert.deepEqual(getMonthOutlook([plan], -3, undefined, now), { paid: 9, scheduled: 0, total: 9 })
+  assert.deepEqual(getMonthOutlook([plan], -2, undefined, now), { paid: 9, scheduled: 0, total: 9 })
+  assert.deepEqual(getMonthOutlook([plan], -1, undefined, now), { paid: 0, scheduled: 0, total: 0 })
+  assert.deepEqual(getMonthOutlook([plan], 0, undefined, now), { paid: 0, scheduled: 10, total: 10 })
+  assert.deepEqual(getMonthOutlook([plan], 1, undefined, now), { paid: 0, scheduled: 10, total: 10 })
+  // Paid so far (18) plus July through December still to come (6 × 10).
+  assert.deepEqual(getYearOutlook([plan], undefined, now), { paid: 18, scheduled: 60, total: 78 })
+
+  // Paying July's charge early moves it from "scheduled" to "paid" — it is
+  // never counted on both sides.
+  const paidEarly = recordSubscriptionPayment(plan, { paidAt: '2026-07-14' })
+  assert.deepEqual(getMonthOutlook([paidEarly], 0, undefined, now), { paid: 10, scheduled: 0, total: 10 })
+  assert.deepEqual(getYearOutlook([paidEarly], undefined, now), { paid: 28, scheduled: 50, total: 78 })
+
+  // An older payment saved without a due date settles the occurrence it was
+  // made for, exactly as it does for the next-renewal date.
+  const legacy = normalizeSubscription(sub({ billingDate: '2026-07-20', paymentHistory: [{ date: '2026-07-13', amount: 10 }] }))
+  assert.equal(formatDateOnly(getNextBillingDate(legacy)), '2026-08-20')
+  assert.equal(getScheduledInRange([legacy], '2026-07-15', '2026-07-31'), 0)
+
+  // Paused plans keep their payment history but schedule nothing.
+  const paused = normalizeSubscription({ ...plan, paused: true })
+  assert.deepEqual(getMonthOutlook([paused], 1, undefined, now), { paid: 0, scheduled: 0, total: 0 })
+  assert.equal(getYearOutlook([paused], undefined, now).paid, 18)
 })

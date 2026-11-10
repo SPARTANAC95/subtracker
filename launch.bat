@@ -12,9 +12,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo.
-echo  Preparing SubTracker (a few seconds)...
-call npm.cmd run build >nul 2>nul
+rem Rebuilds only when the app's files changed since the last start, so a
+rem normal launch opens straight away.
+node scripts\ensure-build.mjs
 
 if not exist "dist\index.html" (
   echo.

@@ -6,6 +6,7 @@ import { getSubscriptionStatus, isCanceled, isReminder } from '../utils/subscrip
 import { formatDateOnly, parseLocalDate, startOfDay } from '../utils/dates'
 import { plural } from '../utils/labels'
 import { downloadCalendarIcs } from '../utils/calendarExport'
+import useMediaQuery, { WIDE_LAYOUT } from '../hooks/useMediaQuery'
 import PageHeading from './PageHeading'
 import ServiceMark from './ServiceMark'
 
@@ -44,6 +45,7 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
     } catch { return 0 }
   })
   const [selectedDay, setSelectedDay] = useState(null)
+  const wide = useMediaQuery(WIDE_LAYOUT)
 
   useEffect(() => {
     try { sessionStorage.setItem('st-calendar-offset', String(monthOffset)) } catch { /* convenience only */ }
@@ -86,7 +88,7 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
     })
     // One-time reminders: mark the day they run out. Nothing is charged that
     // day, so they never contribute to the money totals.
-    subs.filter(s => isReminder(s) && !isCanceled(s)).forEach(s => {
+    subs.filter(s => isReminder(s) && !isCanceled(s) && s.scheduleVerified !== false).forEach(s => {
       const endDate = parseLocalDate(s.endDate)
       if (!endDate || endDate < target || endDate > monthEnd) return
       add(endDate.getDate(), s, 'ends')
@@ -183,59 +185,61 @@ export default function CalendarView({ subs, currency, toBase, onViewDetail }) {
           </div>
 
           {/* Phones get the month as an agenda; the grid needs more room. */}
-          <div className="md:hidden">{agenda}</div>
-
-          <div className="hidden md:block">
-            <div className="cal-weekdays" aria-hidden="true">
-              {WEEKDAYS.map(day => <span key={day}>{day}</span>)}
-            </div>
-            <div className="cal-grid">
-              {days.map((day, i) => {
-                if (!day) return <span key={`blank-${i}`} />
-                const todayClass = day.isToday ? 'today' : ''
-                // Days without events are inert — keep them out of the tab order.
-                if (!day.data) {
-                  return <div key={day.day} className={`cal-cell ${todayClass}`}><span>{day.day}</span></div>
-                }
-                const isSelected = selectedDay === day.day
-                const hasMoney = day.data.amount > 0
-                const state = day.overdue ? 'overdue' : day.settled ? 'settled' : ''
-                return (
-                  <button
-                    key={day.day}
-                    type="button"
-                    onClick={() => setSelectedDay(isSelected ? null : day.day)}
-                    className={`cal-cell has-bills ${todayClass} ${state}`}
-                    style={{ background: heat(Math.min(day.data.amount / maxAmount, 1)) }}
-                    aria-pressed={isSelected}
-                    aria-label={`${monthName} ${day.day}, ${hasMoney ? formatMoney(day.data.amount, currency) : 'a reminder ends'}${day.overdue ? ', overdue' : day.settled ? ', paid' : ''}`}
-                  >
-                    <span>{day.day}</span>
-                    <small>{hasMoney ? formatMoney(day.data.amount, currency) : 'ends'}</small>
-                  </button>
-                )
-              })}
-            </div>
-            <p className="cal-scale" aria-hidden="true">
-              <span>Less</span>
-              {[0, 0.33, 0.66, 1].map(step => <i key={step} style={{ background: heat(step) }} />)}
-              <span>More</span>
-              <span className="cal-key paid">Paid</span>
-              <span className="cal-key overdue">Overdue</span>
-            </p>
-          </div>
-        </section>
-
-        <section className="hidden md:block" aria-labelledby="calendar-agenda-heading">
-          <div className="section-heading">
+          {!wide ? agenda : (
             <div>
-              <h2 id="calendar-agenda-heading">{selected ? `${monthName} ${selected.day}` : 'This month'}</h2>
-              <p>{selected ? 'Everything that lands on this day.' : 'Pick a highlighted day to focus on it.'}</p>
+              <div className="cal-weekdays" aria-hidden="true">
+                {WEEKDAYS.map(day => <span key={day}>{day}</span>)}
+              </div>
+              <div className="cal-grid">
+                {days.map((day, i) => {
+                  if (!day) return <span key={`blank-${i}`} />
+                  const todayClass = day.isToday ? 'today' : ''
+                  // Days without events are inert — keep them out of the tab order.
+                  if (!day.data) {
+                    return <div key={day.day} className={`cal-cell ${todayClass}`}><span>{day.day}</span></div>
+                  }
+                  const isSelected = selectedDay === day.day
+                  const hasMoney = day.data.amount > 0
+                  const state = day.overdue ? 'overdue' : day.settled ? 'settled' : ''
+                  return (
+                    <button
+                      key={day.day}
+                      type="button"
+                      onClick={() => setSelectedDay(isSelected ? null : day.day)}
+                      className={`cal-cell has-bills ${todayClass} ${state}`}
+                      style={{ background: heat(Math.min(day.data.amount / maxAmount, 1)) }}
+                      aria-pressed={isSelected}
+                      aria-label={`${monthName} ${day.day}, ${hasMoney ? formatMoney(day.data.amount, currency) : 'a reminder ends'}${day.overdue ? ', overdue' : day.settled ? ', paid' : ''}`}
+                    >
+                      <span>{day.day}</span>
+                      <small>{hasMoney ? formatMoney(day.data.amount, currency) : 'ends'}</small>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="cal-scale" aria-hidden="true">
+                <span>Less</span>
+                {[0, 0.33, 0.66, 1].map(step => <i key={step} style={{ background: heat(step) }} />)}
+                <span>More</span>
+                <span className="cal-key paid">Paid</span>
+                <span className="cal-key overdue">Overdue</span>
+              </p>
             </div>
-            {selected && <button type="button" onClick={() => setSelectedDay(null)} className="text-link">Show all</button>}
-          </div>
-          {agenda}
+          )}
         </section>
+
+        {wide && (
+          <section aria-labelledby="calendar-agenda-heading">
+            <div className="section-heading">
+              <div>
+                <h2 id="calendar-agenda-heading">{selected ? `${monthName} ${selected.day}` : 'This month'}</h2>
+                <p>{selected ? 'Everything that lands on this day.' : 'Pick a highlighted day to focus on it.'}</p>
+              </div>
+              {selected && <button type="button" onClick={() => setSelectedDay(null)} className="text-link">Show all</button>}
+            </div>
+            {agenda}
+          </section>
+        )}
       </div>
     </>
   )

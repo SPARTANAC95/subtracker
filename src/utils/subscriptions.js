@@ -24,6 +24,12 @@ export const SUBSCRIPTION_DEFAULTS = {
   cycle: 'monthly',
   category: 'other',
   billingDate: '',
+  // False marks a date or price that came from an import/audit and was never
+  // confirmed. An unverified schedule stays out of forecasts, alerts and the
+  // calendar; an unverified price is counted but labelled as an estimate.
+  // Editing the date or the amount in the form confirms it.
+  scheduleVerified: true,
+  amountVerified: true,
   startDate: null,
   notes: '',
   status: 'active',
@@ -81,6 +87,11 @@ export function isActiveSub(sub) {
 
 // Everything that still has a schedule attached — active plus trials. Useful
 // for calendars and billing-pressure views where a trial end is still an event.
+// A date carried over from an import that nobody has confirmed yet.
+export function hasUnverifiedSchedule(sub) {
+  return sub?.scheduleVerified === false
+}
+
 export function isScheduled(sub) {
   if (isReminder(sub)) return false
   const status = getSubscriptionStatus(sub)
@@ -243,6 +254,8 @@ export function normalizeSubscription(input, options = {}) {
     cycle: VALID_CYCLES.has(input.cycle) ? input.cycle : 'monthly',
     category: VALID_CATEGORIES.has(input.category) ? input.category : 'other',
     billingDate,
+    scheduleVerified: input.scheduleVerified !== false,
+    amountVerified: input.amountVerified !== false,
     startDate: optionalDate(input.startDate),
     notes: text(input.notes),
     status,
